@@ -229,6 +229,7 @@ export class HanaEngine {
   get planMode() { return this._configCoord.planMode; }
   get homeCwd() { return this._configCoord.getHomeFolder() || null; }
   get authStorage() { return this._models.authStorage; }
+  get modelRegistry() { return this._models.modelRegistry; }
 
   getHomeFolder() { return this._configCoord.getHomeFolder(); }
   setHomeFolder(f) { return this._configCoord.setHomeFolder(f); }
