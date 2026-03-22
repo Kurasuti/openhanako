@@ -80,14 +80,14 @@ tests/          Vitest test suite
 skills2set/     Built-in skill definitions
 ```
 
-The engine layer coordinates five managers (Agent, Session, Model, Preferences, Skill) and exposes them through a unified facade. The Hub handles background tasks (heartbeat, cron, channel routing) independently of the active chat session. Communication between the Electron main process and the server runs over a child process stdio bridge.
+The engine layer coordinates multiple managers (Agent, Session, Model, Preferences, Skill, Channel, BridgeSession, etc.) and exposes them through a unified facade. The Hub handles background tasks (heartbeat, cron, channel routing, agent messaging, DM routing) independently of the active chat session. Communication between the Electron main process and the server runs over a child process stdio bridge.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | Desktop | Electron 38 |
-| Frontend | React 19 + Vite 7 (migrating from vanilla JS) |
+| Frontend | React 19 + Vite 7 |
 | Server | Fastify 5 |
 | Agent Runtime | [Pi SDK](https://github.com/nicepkg/pi) |
 | Database | better-sqlite3 (WAL mode) |

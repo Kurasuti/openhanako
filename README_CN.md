@@ -88,14 +88,14 @@ tests/          Vitest 测试
 skills2set/     内置技能定义
 ```
 
-引擎层协调五个 Manager（Agent、Session、Model、Preferences、Skill），通过统一的 facade 暴露。Hub 负责后台任务（心跳巡检、定时任务、频道路由），独立于当前聊天会话运行。Electron 主进程与服务端通过子进程 stdio 桥接通信。
+引擎层协调多个 Manager（Agent、Session、Model、Preferences、Skill、Channel、BridgeSession 等），通过统一的 facade 暴露。Hub 负责后台任务（心跳巡检、定时任务、频道路由、Agent 间通信、DM 路由），独立于当前聊天会话运行。Electron 主进程与服务端通过子进程 stdio 桥接通信。
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
 | 桌面端 | Electron 38 |
-| 前端 | React 19 + Vite 7（从 vanilla JS 迁移中） |
+| 前端 | React 19 + Vite 7 |
 | 服务端 | Fastify 5 |
 | Agent 运行时 | [Pi SDK](https://github.com/nicepkg/pi) |
 | 数据库 | better-sqlite3（WAL 模式） |
