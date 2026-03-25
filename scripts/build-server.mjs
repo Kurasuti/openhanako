@@ -42,6 +42,7 @@ import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
+import { builtinModules } from "module";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -203,23 +204,35 @@ console.log("[build-server]   desktop/src/locales/");
 console.log("[build-server] resource files copied");
 
 // ── 4. External dependencies ──
-// 只装 Vite config 中 external 的包（native addon + 无法 bundle 的 SDK）
-// 比全量 npm ci 少很多（~50 packages vs ~500+）
+// 从 vite.config.server.js 的 external 列表自动派生需要安装的包。
+// 规则：external ∩ rootPkg.dependencies = 需要安装的包。
+// 这消除了手动维护两个列表导致的遗漏（如 #242 ws 缺失）。
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf-8"));
 
-// 从根 package.json 动态读取版本，保持同步
-const EXTERNAL_DEPS = [
-  "better-sqlite3",
-  "@mariozechner/pi-coding-agent",
-  "@larksuiteoapi/node-sdk",
-  "node-telegram-bot-api",
-  "exceljs",
-];
-const externalDeps = {};
-for (const dep of EXTERNAL_DEPS) {
-  if (rootPkg.dependencies[dep]) externalDeps[dep] = rootPkg.dependencies[dep];
-  else console.warn(`[build-server] ⚠ ${dep} not in root package.json`);
+// defineConfig 是纯 identity 函数，import 安全无副作用
+const viteConfig = (await import("../vite.config.server.js")).default;
+const viteExternals = viteConfig.build?.rollupOptions?.external;
+if (!Array.isArray(viteExternals)) {
+  throw new Error("[build-server] vite.config.server.js external must be an array");
 }
+
+const builtinSet = new Set(builtinModules.flatMap(m => [m, `node:${m}`]));
+const deps = rootPkg.dependencies || {};
+const externalDeps = {};
+
+for (const ext of viteExternals) {
+  if (typeof ext === "string") {
+    if (builtinSet.has(ext)) continue;
+    if (deps[ext]) externalDeps[ext] = deps[ext];
+    // 不在 dependencies 中的（如 fsevents、photon-node）由 transitive 或 optional 提供
+  } else if (ext instanceof RegExp) {
+    for (const dep of Object.keys(deps)) {
+      if (ext.test(dep)) externalDeps[dep] = deps[dep];
+    }
+  }
+}
+
+console.log(`[build-server] derived external deps: ${Object.keys(externalDeps).join(", ")}`);
 
 const externalPkg = {
   name: "hanako-server",
@@ -233,7 +246,7 @@ fs.writeFileSync(
   JSON.stringify(externalPkg, null, 2) + "\n",
 );
 
-// 不复制 lockfile：精简后的 package.json 只有 5 个依赖，
+// 不复制 lockfile：精简后的 package.json 依赖数量少，
 // 跟完整 lockfile 不匹配，npm ci 会报错。用 npm install 代替。
 
 // ── 5. 用目标 Node 的 npm 安装 external deps ──
@@ -242,6 +255,27 @@ fs.writeFileSync(
 // 用 npm install 而非 npm ci：lockfile 跟精简 package.json 不匹配
 console.log("[build-server] installing external dependencies...");
 runWithTargetNode(`"${cachedNpmCli}" install --omit=dev`);
+
+// ── 5b. 验证所有 Vite external 在 node_modules 中可达 ──
+// 遍历 string 类型的 external，检查 node_modules 中是否存在。
+// RegExp external（如 /^@mariozechner\//）不在此检查范围内，
+// 因为匹配的包已通过派生逻辑显式安装或作为 transitive dep 存在。
+// platform-optional（fsevents）允许缺失，其余缺失说明 transitive 链断了。
+const OPTIONAL_EXTERNALS = new Set(["fsevents"]);
+const missing = [];
+for (const ext of viteExternals) {
+  if (typeof ext !== "string" || builtinSet.has(ext)) continue;
+  if (!fs.existsSync(path.join(outDir, "node_modules", ext))) {
+    if (OPTIONAL_EXTERNALS.has(ext)) continue;
+    missing.push(ext);
+  }
+}
+if (missing.length > 0) {
+  console.error(`[build-server] ❌ Vite externals missing from node_modules: ${missing.join(", ")}`);
+  console.error(`[build-server]   These packages are external in the bundle but not installed.`);
+  console.error(`[build-server]   Fix: add them to root package.json dependencies, or check transitive dep chains.`);
+  process.exit(1);
+}
 
 // ── 6. PI SDK patch ──
 // package.json 没有 postinstall，手动跑补丁
