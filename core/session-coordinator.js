@@ -191,13 +191,15 @@ export class SessionCoordinator {
       await this._d.switchAgentOnly(targetAgentId);
     }
 
-    // 从 session-meta.json 恢复记忆开关
+    // 从 session-meta.json 恢复记忆开关 & 模型
     let memoryEnabled = true;
+    let savedModelId = null;
     try {
       const metaPath = path.join(this._d.getAgent().sessionDir, "session-meta.json");
       const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
       const sessKey = path.basename(sessionPath);
       if (meta[sessKey]?.memoryEnabled === false) memoryEnabled = false;
+      if (meta[sessKey]?.modelId) savedModelId = meta[sessKey].modelId;
     } catch (err) {
       if (err.code !== "ENOENT") {
         log.warn(`session-meta.json 读取失败: ${err.message}`);
@@ -217,6 +219,16 @@ export class SessionCoordinator {
       }
       this._session = existing.session;
       existing.lastTouchedAt = Date.now();
+      // ── 恢复该 session 快照的模型 ──
+      if (existing.modelId) {
+        try {
+          const models = this._d.getModels();
+          const model = models.setModel(existing.modelId);
+          await existing.session.setModel(model);
+        } catch (err) {
+          log.warn(`session model restore failed (${existing.modelId}): ${err.message}`);
+        }
+      }
       const targetAgent = this._d.getAgentById(existing.agentId) || this._d.getAgent();
       targetAgent.setMemoryEnabled(memoryEnabled);
       return existing.session;
@@ -229,6 +241,17 @@ export class SessionCoordinator {
         const oldEntry = this._sessions.get(oldSp);
         const oldAgent = oldEntry ? this._d.getAgentById(oldEntry.agentId) : this._d.getAgent();
         await oldAgent?._memoryTicker?.notifySessionEnd(oldSp).catch(() => {});
+      }
+    }
+    // 冷启动恢复：先保存当前模型，尝试恢复快照模型，失败时回退
+    if (savedModelId) {
+      const models = this._d.getModels();
+      const prevModel = models.currentModel;
+      try {
+        models.setModel(savedModelId);
+      } catch (err) {
+        log.warn(`cold-start model restore failed (${savedModelId}): ${err.message}`);
+        if (prevModel) models.currentModel = prevModel;
       }
     }
     const sessionMgr = SessionManager.open(sessionPath, this._d.getAgent().sessionDir);
