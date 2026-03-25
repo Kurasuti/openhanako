@@ -164,7 +164,40 @@ export class ConfigCoordinator {
   // ── Favorites ──
 
   readFavorites() {
-    return this._prefs().favorites || [];
+    const prefs = this._prefs();
+    const favorites = prefs.favorites || [];
+
+    // 主动迁移：裸字符串 → {id, provider} 对象
+    // 旧格式裸字符串无法在 sync-favorites 中正确归属 provider，
+    // 这里通过 providers.yaml 的 model 列表做一次性转换。
+    let migrated = false;
+    const globalProviders = loadGlobalProviders().providers || {};
+    // 建反查表：modelId → providerName（优先 providers.yaml，兜底 default-models）
+    const idToProvider = new Map();
+    for (const [name, p] of Object.entries(globalProviders)) {
+      for (const mid of (p.models || [])) {
+        if (!idToProvider.has(mid)) idToProvider.set(mid, name);
+      }
+    }
+
+    const result = favorites.map(item => {
+      if (typeof item === "object" && item?.id) return item; // 已是新格式
+      if (typeof item !== "string") return item;
+      const prov = idToProvider.get(item);
+      if (prov) {
+        migrated = true;
+        return { id: item, provider: prov };
+      }
+      return item; // 找不到 provider 的保持原样
+    });
+
+    if (migrated) {
+      prefs.favorites = result;
+      this._savePrefs(prefs);
+      log.log(`favorites migrated: ${result.filter(f => typeof f === "object").length} items converted`);
+    }
+
+    return result;
   }
 
   async saveFavorites(favorites) {

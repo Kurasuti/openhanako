@@ -60,7 +60,8 @@ describe("syncFavoritesToModelsJson", () => {
     expect(fs.existsSync(modelsPath)).toBe(true);
   });
 
-  it("provider 缺少 api 协议时直接报错", () => {
+  it("provider 缺少 api 协议时跳过该 provider 而不阻塞", () => {
+    const modelsPath = path.join(tmpRoot, "custom-models.json");
     fs.writeFileSync(
       configPath,
       [
@@ -78,9 +79,8 @@ describe("syncFavoritesToModelsJson", () => {
       "utf-8",
     );
 
-    expect(() => syncFavoritesToModelsJson(configPath, {
-      modelsJsonPath: path.join(tmpRoot, "custom-models.json"),
-    })).toThrow('error.providerMissingApi');
+    // 不应 throw，而是跳过缺 api 的 provider
+    expect(() => syncFavoritesToModelsJson(configPath, { modelsJsonPath: modelsPath })).not.toThrow();
   });
 
   it("显式传入空 favorites 时不会回退到 config 里的旧 favorites", () => {

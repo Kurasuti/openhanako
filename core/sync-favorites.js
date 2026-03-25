@@ -221,19 +221,24 @@ export function syncFavoritesToModelsJson(configPath, opts = {}) {
   // ── 5. 构建新的 models.json ──
   const newProviders = {};
   for (const [provName, targetModelIds] of providerModels) {
-    const { baseUrl, apiKey, api } = resolveProviderCredentials(provName, rawConfig, opts);
-
-    if (!baseUrl) {
-      throw new Error(t("error.providerMissingBaseUrl", { provider: provName }));
+    let baseUrl, apiKey, api;
+    try {
+      ({ baseUrl, apiKey, api } = resolveProviderCredentials(provName, rawConfig, opts));
+    } catch (err) {
+      console.warn(`\x1b[33m  [sync] provider "${provName}" credentials resolve failed: ${err.message}，跳过\x1b[0m`);
+      continue;
     }
-    if (!api) {
-      throw new Error(t("error.providerMissingApi", { provider: provName }));
+
+    if (!baseUrl || !api) {
+      console.warn(`\x1b[33m  [sync] provider "${provName}" 缺少 baseUrl 或 api，跳过 ${targetModelIds.size} 个模型\x1b[0m`);
+      continue;
     }
 
     // 本地服务（localhost）不需要 apiKey，给个占位符让 Pi SDK 通过 hasAuth
     const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(baseUrl);
     if (!apiKey && !isLocal) {
-      throw new Error(t("error.providerMissingApiKey", { provider: provName }));
+      console.warn(`\x1b[33m  [sync] provider "${provName}" 缺少 apiKey，跳过 ${targetModelIds.size} 个模型\x1b[0m`);
+      continue;
     }
     const effectiveApiKey = apiKey || "local";
 

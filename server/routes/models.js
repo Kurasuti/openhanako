@@ -44,21 +44,25 @@ export function createModelsRoute(engine) {
       const available = engine.availableModels;
 
       const overrides = engine.config?.models?.overrides;
-      const result = favorites.map(item => {
+      const result = [];
+      for (const item of favorites) {
         // 支持新格式 {id, provider} 和旧格式 string
         const modelId = typeof item === "object" && item?.id ? item.id : String(item);
         const hintProvider = typeof item === "object" ? item?.provider : undefined;
         const m = available.find(am => am.id === modelId);
-        return {
+        const provider = m?.provider || hintProvider || "";
+        // 跳过无法解析 provider 的幽灵模型（sync 失败或 credentials 缺失）
+        if (!m && !hintProvider) continue;
+        result.push({
           id: modelId,
           name: resolveModelName(modelId, m?.name, overrides),
-          provider: m?.provider || hintProvider || "",
+          provider,
           isCurrent: modelId === engine.currentModel?.id,
           reasoning: m ? !!m.reasoning : false,
           xhigh: m ? supportsXhigh(m) : false,
-          vision: m?.provider ? (engine.providerRegistry.get(m.provider)?.capabilities?.vision !== false) : true,
-        };
-      });
+          vision: provider ? (engine.providerRegistry.get(provider)?.capabilities?.vision !== false) : true,
+        });
+      }
 
       return c.json({
         models: result,
