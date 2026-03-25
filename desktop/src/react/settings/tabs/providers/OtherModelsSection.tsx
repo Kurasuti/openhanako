@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSettingsStore } from '../../store';
 import { hanaFetch } from '../../api';
 import {
@@ -58,10 +58,16 @@ function ToolModelTestBtn({ modelId }: { modelId: string }) {
 
 export function OtherModelsSection({ providers }: { providers: Record<string, { models?: string[]; base_url?: string }> }) {
   const { globalModelsConfig, pendingFavorites, showToast } = useSettingsStore();
+  const savedSearchKey = globalModelsConfig?.search?.api_key || '';
   const [searchApiKey, setSearchApiKey] = useState('');
+  const [searchKeyEdited, setSearchKeyEdited] = useState(false);
+
+  // 从后端同步已保存的 key
+  useEffect(() => {
+    if (!searchKeyEdited && savedSearchKey) setSearchApiKey(savedSearchKey);
+  }, [savedSearchKey, searchKeyEdited]);
 
   const searchProvider = globalModelsConfig?.search?.provider || '';
-  const maskedSearchKey = globalModelsConfig?.search?.api_key;
 
   const verifySearch = async () => {
     const provider = (globalModelsConfig?.search?.provider || '').trim();
@@ -140,8 +146,8 @@ export function OtherModelsSection({ providers }: { providers: Record<string, { 
           <label className={styles['settings-field-label']}>{t('settings.api.searchApiKey')}</label>
           <KeyInput
             value={searchApiKey}
-            onChange={setSearchApiKey}
-            placeholder={maskedSearchKey || t('settings.api.apiKeyPlaceholder')}
+            onChange={(v) => { setSearchApiKey(v); setSearchKeyEdited(true); }}
+            placeholder={t('settings.api.apiKeyPlaceholder')}
           />
           <button className={styles['search-verify-btn']} onClick={verifySearch}>
             {t('settings.search.verify')}
