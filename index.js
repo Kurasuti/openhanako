@@ -166,7 +166,8 @@ const ask = () => {
     if (trimmed === "/model") {
       console.log("\n可用模型：");
       available.forEach((m, i) => {
-        const current = m.id === engine.currentModel?.id ? " ← 当前" : "";
+        const cur = engine.currentModel;
+        const current = (m.id === cur?.id && m.provider === cur?.provider) ? " ← 当前" : "";
         console.log(`  ${i + 1}. ${m.name} (${m.provider})${current}`);
       });
       rl.question("\n选择模型编号 > ", async (num) => {

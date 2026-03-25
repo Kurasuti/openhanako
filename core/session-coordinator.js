@@ -154,6 +154,7 @@ export class SessionCoordinator {
       memoryEnabled,
       planMode: initialPlanMode,
       modelId: models.currentModel?.id || null,
+      modelProvider: models.currentModel?.provider || null,
       lastTouchedAt: Date.now(),
       unsub,
     });
@@ -231,7 +232,7 @@ export class SessionCoordinator {
         try {
           const models = this._d.getModels();
           // 从活跃 session 的实际模型对象获取 provider（比 entry 快照更准确）
-          const entryProvider = existing.session?.model?.provider || undefined;
+          const entryProvider = existing.session?.model?.provider || existing.modelProvider || undefined;
           const model = models.setModel(existing.modelId, entryProvider);
           await existing.session.setModel(model);
         } catch (err) {

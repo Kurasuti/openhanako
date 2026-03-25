@@ -46,7 +46,7 @@ export function ModelSelector({ models, disabled }: { models: Array<{ id: string
       groups[key].push(m);
     }
     // 当前模型不在 favorites 时强制加入
-    if (current && !models.find(m => m.id === current.id)) {
+    if (current && !models.find(m => m.id === current.id && m.provider === current.provider)) {
       const key = current.provider || '';
       if (!groups[key]) groups[key] = [];
       groups[key].unshift(current);
