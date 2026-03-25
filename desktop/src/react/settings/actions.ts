@@ -3,7 +3,7 @@
  */
 import { useSettingsStore } from './store';
 import { hanaFetch, hanaUrl } from './api';
-import { t } from './helpers';
+import { t, deserializeFavorites } from './helpers';
 
 const platform = window.platform;
 
@@ -86,9 +86,9 @@ export async function loadSettingsConfig() {
     try {
       const favRes = await hanaFetch('/api/favorites');
       const favData = await favRes.json();
-      store.set({ pendingFavorites: new Set(favData.favorites || []) });
+      store.set({ pendingFavorites: deserializeFavorites(favData.favorites || []) });
     } catch {
-      store.set({ pendingFavorites: new Set(config.models?.favorites || []) });
+      store.set({ pendingFavorites: deserializeFavorites(config.models?.favorites || []) });
     }
 
     store.set({

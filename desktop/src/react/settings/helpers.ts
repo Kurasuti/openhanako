@@ -7,6 +7,42 @@ import knownModels from '../../../../lib/known-models.json';
 
 const platform = window.platform;
 
+/** Internal format: "provider:modelId" */
+export function favKey(provider: string, modelId: string): string {
+  return `${provider}:${modelId}`;
+}
+
+/** Parse internal format back to {provider, id} */
+export function parseFavKey(key: string): { provider: string; id: string } {
+  const idx = key.indexOf(':');
+  if (idx === -1) return { provider: '', id: key };
+  return { provider: key.slice(0, idx), id: key.slice(idx + 1) };
+}
+
+/** Serialize pendingFavorites Set for API */
+export function serializeFavorites(favSet: Set<string>): Array<string | { id: string; provider: string }> {
+  return [...favSet].map(key => {
+    const { provider, id } = parseFavKey(key);
+    if (provider) return { id, provider };
+    return id;
+  });
+}
+
+/** Deserialize API favorites into Set<"provider:id"> */
+export function deserializeFavorites(
+  raw: Array<string | { id: string; provider: string }>,
+): Set<string> {
+  const set = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === 'object' && item && item.id && item.provider) {
+      set.add(favKey(item.provider, item.id));
+    } else if (typeof item === 'string') {
+      set.add(item); // Old format: bare ID, keep as-is for backward compat
+    }
+  }
+  return set;
+}
+
 export function t(key: string, params?: Record<string, any>): any {
   return window.t?.(key, params) ?? key;
 }
@@ -131,7 +167,7 @@ export function autoSaveModels() {
       await hanaFetch('/api/favorites', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ favorites: [...store.pendingFavorites] }),
+        body: JSON.stringify({ favorites: serializeFavorites(store.pendingFavorites) }),
       });
       store.showToast(t('settings.autoSaved'), 'success');
       platform?.settingsChanged?.('models-changed');
