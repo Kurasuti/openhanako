@@ -1,7 +1,7 @@
 /**
  * PreferencesManager — 全局 preferences.json 读写
  *
- * 统一管理用户级全局配置（favorites、bridge、agent 排序等），
+ * 统一管理用户级全局配置（bridge、agent 排序等），
  * 以及 primaryAgent 偏好。从 Engine 提取，避免 route 穿透私有字段。
  */
 import fs from "fs";

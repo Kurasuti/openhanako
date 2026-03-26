@@ -510,18 +510,7 @@ export class HanaEngine {
       }
     }
 
-    // 5. 一次性迁移 favorites
-    const prefs = this._readPreferences();
-    if (!prefs.favorites) {
-      const agentFavs = this.agent.config.models?.favorites;
-      if (agentFavs?.length) {
-        prefs.favorites = agentFavs;
-        this._writePreferences(prefs);
-        log(`✿ 已迁移 ${agentFavs.length} 个收藏模型到全局配置`);
-      }
-    }
-
-    // 6. Sync skills + watch skillsDir
+    // 5. Sync skills + watch skillsDir
     this._syncAllAgentSkills();
     this._skills.watch(this._resourceLoader, this._agentMgr.agents, () => {
       this._resourceLoader.getSystemPrompt = () => this.agent.systemPrompt;

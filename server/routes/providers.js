@@ -11,7 +11,7 @@ export function createProvidersRoute(engine) {
   // ── Provider Summary ──
 
   /**
-   * 统一概览：合并 providers.yaml + OAuth status + favorites + SDK 模型
+   * 统一概览：合并 providers.yaml + OAuth status + SDK 模型
    * 前端新 ProvidersTab 的核心数据源
    */
   route.get("/providers/summary", async (c) => {

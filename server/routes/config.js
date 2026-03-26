@@ -74,7 +74,7 @@ export function createConfigRoute(engine) {
       // providers 块 → 全局 providers.yaml
       let providersChanged = false;
       if (agentPartial.providers) {
-        // 删除 provider 时（值为 null），同步清理 models.json + favorites
+        // 删除 provider 时（值为 null），同步清理 models.json
         const deletedProviders = Object.keys(agentPartial.providers)
           .filter(name => agentPartial.providers[name] === null);
         if (deletedProviders.length > 0) {
