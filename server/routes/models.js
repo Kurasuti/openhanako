@@ -31,6 +31,8 @@ export function createModelsRoute(engine) {
         isCurrent: modelRefEquals(m, cur),
         vision: m.vision || false,
         reasoning: m.reasoning || false,
+        contextWindow: m.contextWindow || null,
+        maxTokens: m.maxTokens || null,
       }));
       return c.json({ models, current: cur?.id || null });
     } catch (err) {

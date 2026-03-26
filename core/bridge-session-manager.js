@@ -241,7 +241,7 @@ export class BridgeSessionManager {
       try {
         // vision 能力检查：模型不支持图片时直接返回错误，不静默丢弃
         if (opts.images?.length) {
-          const model = session.model || this._engine?.currentModel;
+          const model = session.model;
           if (model?.vision === false) {
             return t("error.modelNoVision");
           }

@@ -98,7 +98,8 @@
       "name": "Kimi K2.5",
       "context": 262144,
       "maxOutput": 262144,
-      "vision": true
+      "vision": true,
+      "reasoning": true
     },
     "kimi-k2": {
       "name": "Kimi K2",
@@ -1264,7 +1265,8 @@
       "name": "Kimi K2.5",
       "context": 262144,
       "maxOutput": 262144,
-      "vision": true
+      "vision": true,
+      "reasoning": true
     },
     "kimi-k2": {
       "name": "Kimi K2",
@@ -1384,6 +1386,12 @@
     }
   },
   "volcengine": {
+    "doubao-seed-1-6-flash-250828": {
+      "name": "Doubao Seed 1.6 Flash",
+      "context": 131072,
+      "maxOutput": 16384,
+      "vision": true
+    },
     "doubao-seed-2-0-pro-260215": {
       "name": "Doubao Seed 2.0 Pro",
       "context": 262144,
@@ -1558,7 +1566,8 @@
       "name": "GLM-5",
       "context": 131072,
       "maxOutput": 16384,
-      "vision": true
+      "vision": true,
+      "reasoning": true
     },
     "glm-4-plus": {
       "name": "GLM-4 Plus",
@@ -3971,7 +3980,8 @@
       "name": "Moonshotai/Kimi K2.5",
       "context": 262144,
       "maxOutput": 262144,
-      "vision": true
+      "vision": true,
+      "reasoning": true
     },
     "openai/gpt-3.5-turbo": {
       "name": "Openai/Gpt 3.5 Turbo",
@@ -4234,7 +4244,8 @@
       "name": "Z Ai/Glm 5",
       "context": 202752,
       "maxOutput": 128000,
-      "reasoning": true
+      "reasoning": true,
+      "vision": true
     },
     "minimax/minimax-m2.1": {
       "name": "Minimax/Minimax M2.1",
@@ -4347,7 +4358,8 @@
       "name": "Kimi K2.5",
       "context": 262144,
       "maxOutput": 262144,
-      "vision": true
+      "vision": true,
+      "reasoning": true
     },
     "kimi-k2": {
       "name": "Kimi K2",
@@ -4359,7 +4371,8 @@
       "name": "GLM-5",
       "context": 131072,
       "maxOutput": 16384,
-      "vision": true
+      "vision": true,
+      "reasoning": true
     },
     "glm-4-plus": {
       "name": "GLM-4 Plus",
