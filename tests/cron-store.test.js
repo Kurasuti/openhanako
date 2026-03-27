@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CronStore } from "../lib/desk/cron-store.js";
 import fs from "fs";
 import path from "path";
@@ -376,5 +376,134 @@ describe("CronStore _load 错误处理", () => {
     store.listJobs();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+// ════════════════════════════════════════════
+//  markRun 错误退避
+// ════════════════════════════════════════════
+
+describe("CronStore markRun 错误退避", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: new Date("2026-03-28T12:00:00.000Z") });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("success 时 consecutiveErrors 归 0", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 3600000, prompt: "test" });
+    // 手动设置一些错误计数
+    store.getJob(job.id).consecutiveErrors = 3;
+    store.markRun(job.id, { success: true });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(0);
+  });
+
+  it("failure 时 consecutiveErrors 递增", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 3600000, prompt: "test" });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(0);
+
+    store.markRun(job.id, { success: false });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(1);
+
+    store.markRun(job.id, { success: false });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(2);
+  });
+
+  it("failure 时 nextRunAt 包含退避时间", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 3600000, prompt: "test" });
+
+    // 首次失败：consecutiveErrors=1 → 退避 1 分钟
+    store.markRun(job.id, { success: false });
+    const nextRun = new Date(store.getJob(job.id).nextRunAt);
+    const expectedBackoff = new Date(Date.now() + 60_000);
+    // nextRunAt 应该 >= 退避时间（退避 1 min vs 正常 1 hour，正常间隔更大则取正常）
+    // every 3600000 的 normalNext = now + 1h，远大于退避 1 min，所以 nextRunAt = normalNext
+    const normalNext = new Date(Date.now() + 3600000);
+    expect(nextRun.getTime()).toBeGreaterThanOrEqual(normalNext.getTime() - 1000);
+  });
+
+  it("failure 时短间隔任务 nextRunAt 被退避推迟", () => {
+    const store = makeTmpStore();
+    // 60 秒间隔的任务
+    const job = store.addJob({ type: "every", schedule: 60000, prompt: "test" });
+
+    // 第 2 次失败：consecutiveErrors=2 → 退避 5 分钟（300_000 ms）
+    store.markRun(job.id, { success: false }); // consecutiveErrors=1, backoff=60s
+    store.markRun(job.id, { success: false }); // consecutiveErrors=2, backoff=300s
+
+    const nextRun = new Date(store.getJob(job.id).nextRunAt);
+    // normalNext = now + 60s，backoffNext = now + 300s → 取 backoffNext
+    const backoffNext = new Date(Date.now() + 300_000);
+    // 允许 1 秒误差
+    expect(Math.abs(nextRun.getTime() - backoffNext.getTime())).toBeLessThan(1000);
+  });
+
+  it("多次失败后退避递增（3 次失败 → 退避 15 分钟）", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 60000, prompt: "test" });
+
+    store.markRun(job.id, { success: false }); // 1 → 60s
+    store.markRun(job.id, { success: false }); // 2 → 300s
+    store.markRun(job.id, { success: false }); // 3 → 900s
+
+    expect(store.getJob(job.id).consecutiveErrors).toBe(3);
+
+    const nextRun = new Date(store.getJob(job.id).nextRunAt);
+    const backoffNext = new Date(Date.now() + 900_000); // 15 分钟
+    expect(Math.abs(nextRun.getTime() - backoffNext.getTime())).toBeLessThan(1000);
+  });
+
+  it("成功后退避重置", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 60000, prompt: "test" });
+
+    // 连续失败 3 次
+    store.markRun(job.id, { success: false });
+    store.markRun(job.id, { success: false });
+    store.markRun(job.id, { success: false });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(3);
+
+    // 成功一次
+    store.markRun(job.id, { success: true });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(0);
+
+    // 再次失败：退避应从头开始（1 分钟，不是 15 分钟）
+    store.markRun(job.id, { success: false });
+    expect(store.getJob(job.id).consecutiveErrors).toBe(1);
+
+    const nextRun = new Date(store.getJob(job.id).nextRunAt);
+    // backoff[1] = 60_000，normalNext = now + 60_000，两者相同量级
+    const backoffNext = new Date(Date.now() + 60_000);
+    // 差值应接近 0 或正常间隔（60s），都在退避范围内
+    expect(nextRun.getTime()).toBeGreaterThanOrEqual(backoffNext.getTime() - 1000);
+  });
+
+  it("退避上限为 60 分钟（超过 BACKOFF 表长度后不再增长）", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 60000, prompt: "test" });
+
+    // 失败 10 次（超过 BACKOFF 表的 5 个元素）
+    for (let i = 0; i < 10; i++) {
+      store.markRun(job.id, { success: false });
+    }
+
+    expect(store.getJob(job.id).consecutiveErrors).toBe(10);
+    const nextRun = new Date(store.getJob(job.id).nextRunAt);
+    const maxBackoff = new Date(Date.now() + 3_600_000); // 60 分钟
+    expect(Math.abs(nextRun.getTime() - maxBackoff.getTime())).toBeLessThan(1000);
+  });
+
+  it("默认参数（无 opts）等同 success=true", () => {
+    const store = makeTmpStore();
+    const job = store.addJob({ type: "every", schedule: 3600000, prompt: "test" });
+    store.getJob(job.id).consecutiveErrors = 5;
+
+    // 不传第二个参数
+    store.markRun(job.id);
+    expect(store.getJob(job.id).consecutiveErrors).toBe(0);
   });
 });
