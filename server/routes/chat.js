@@ -632,13 +632,10 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                   }
                 }
               }
-              // vision 能力检查：模型不支持图片时拦截，防止坏消息污染会话历史
-              if (msg.images?.length) {
-                const model = engine.currentModel;
-                if (model?.vision === false) {
-                  wsSend(ws, { type: "error", message: t("error.modelNoVision") });
-                  return;
-                }
+              // 非 vision 模型：静默剥离图片，只发文字。不拦截、不报错。
+              // vision 未知（undefined）的模型：放行，让 API 决定。
+              if (msg.images?.length && engine.currentModel?.vision === false) {
+                msg.images = undefined;
               }
               // 只发图片没文字时补一个占位文本，防止空 text 导致某些 API 异常
               let promptText = msg.text || "";

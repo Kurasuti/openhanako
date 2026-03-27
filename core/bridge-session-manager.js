@@ -239,12 +239,9 @@ export class BridgeSessionManager {
       });
 
       try {
-        // vision 能力检查：模型不支持图片时直接返回错误，不静默丢弃
-        if (opts.images?.length) {
-          const model = session.model;
-          if (model?.vision === false) {
-            return t("error.modelNoVision");
-          }
+        // 非 vision 模型：静默剥离图片，只发文字
+        if (opts.images?.length && session.model?.vision === false) {
+          opts.images = undefined;
         }
         const promptOpts = opts.images?.length ? { images: opts.images } : undefined;
         await session.prompt(prompt, promptOpts);
