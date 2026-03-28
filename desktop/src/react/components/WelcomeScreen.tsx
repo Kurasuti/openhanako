@@ -140,12 +140,17 @@ function WelcomeAvatar({ agentId, hasAvatar, agentAvatarUrl, yuan, name }: {
     setSrc(yuanFallbackAvatar(yuan));
   }, [yuan]);
 
+  const handleClick = useCallback(() => {
+    window.platform?.openSettings?.('agent');
+  }, []);
+
   return (
     <img
       className={styles.welcomeAvatar}
       src={src}
       alt={name}
       draggable={false}
+      onClick={handleClick}
       onError={handleError}
     />
   );

@@ -149,6 +149,7 @@ export async function switchSession(path: string): Promise<void> {
       pendingNewSession: false,
       selectedFolder: null,
       selectedAgentId: null,
+      welcomeVisible: false,
       memoryEnabled: data.memoryEnabled !== false,
       isStreaming: !!data.isStreaming,
       streamingSessions,

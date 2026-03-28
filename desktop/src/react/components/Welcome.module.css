@@ -16,10 +16,15 @@
     height: 100px;
     border-radius: 50%;
     object-fit: cover;
-    pointer-events: none;
     user-select: none;
     box-shadow: 0 4px 16px var(--shadow);
     margin-bottom: var(--space-xs);
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+}
+
+.welcomeAvatar:hover {
+    box-shadow: 0 4px 20px var(--shadow), 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 .welcomeText {

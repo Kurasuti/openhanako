@@ -148,7 +148,7 @@
     align-items: center;
     gap: 6px;
     padding: 5px var(--space-sm);
-    cursor: pointer;
+    cursor: default;
     font-size: 0.72rem;
     line-height: 1.5;
     transition: background 0.1s;
