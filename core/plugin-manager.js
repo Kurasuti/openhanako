@@ -43,6 +43,11 @@ export class PluginManager {
         const pluginDir = path.join(dir, entry.name);
         try {
           const desc = this._readPluginDescriptor(pluginDir, entry.name);
+          if (seen.has(`id:${desc.id}`)) {
+            console.warn(`[plugin-manager] plugin id "${desc.id}" 冲突（目录 "${entry.name}"），跳过`);
+            continue;
+          }
+          seen.add(`id:${desc.id}`);
           results.push(desc);
         } catch (err) {
           console.error(`[plugin-manager] failed to read plugin "${entry.name}":`, err.message);
@@ -396,6 +401,8 @@ export class PluginManager {
   async unloadPlugin(pluginId) {
     const entry = this._plugins.get(pluginId);
     if (!entry) return;
+
+    // 1. 生命周期清理（onunload + disposables）
     if (entry.instance) {
       if (typeof entry.instance.onunload === "function") {
         try { await entry.instance.onunload(); } catch (err) {
@@ -409,7 +416,21 @@ export class PluginManager {
       }
       entry._disposables = [];
     }
+
+    // 2. 清理静态贡献（文件约定加载的 tools、commands 等）
+    this._tools = this._tools.filter(t => t._pluginId !== pluginId);
+    this._commands = this._commands.filter(c => c._pluginId !== pluginId);
+    this._skillPaths = this._skillPaths.filter(s => s.label !== `plugin:${pluginId}`);
+    this._agentTemplates = this._agentTemplates.filter(t => t._pluginId !== pluginId);
+    this._providerPlugins = this._providerPlugins.filter(p => p._pluginId !== pluginId);
+    this._configSchemas = this._configSchemas.filter(s => s.pluginId !== pluginId);
+    for (const [eventType, handlers] of this._hookRegistry) {
+      const filtered = handlers.filter(h => h.pluginId !== pluginId);
+      if (filtered.length === 0) this._hookRegistry.delete(eventType);
+      else this._hookRegistry.set(eventType, filtered);
+    }
     this.routeRegistry.delete(pluginId);
+
     entry.status = "unloaded";
   }
 
