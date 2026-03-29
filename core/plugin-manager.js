@@ -270,9 +270,11 @@ export class PluginManager {
       return c.json({ error: "Plugin internal error", plugin: entry.id }, 500);
     });
 
-    // Middleware: inject ctx
+    // Middleware: inject ctx + agentId (from proxy header)
     app.use("*", async (c, next) => {
       c.set("pluginCtx", ctx);
+      const agentId = c.req.header("X-Hana-Agent-Id") || null;
+      c.set("agentId", agentId);
       await next();
     });
 
@@ -284,9 +286,11 @@ export class PluginManager {
         if (typeof mod.default === "function") {
           const sub = mod.default;
           if (sub && typeof sub.fetch === "function") {
-            // Static Hono app — inject ctx middleware onto sub-app too
+            // Static Hono app — inject ctx + agentId middleware onto sub-app too
             sub.use("*", async (c, next) => {
               c.set("pluginCtx", ctx);
+              const agentId = c.req.header("X-Hana-Agent-Id") || null;
+              c.set("agentId", agentId);
               await next();
             });
             const prefix = "/" + path.basename(file, ".js");

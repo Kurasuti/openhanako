@@ -141,10 +141,14 @@ export class SessionCoordinator {
     this._session = session;
     this._sessionStarted = false;
 
-    // 事件转发
+    // 事件转发（附带 agentId，供订阅者按 agent 过滤）
     const sessionPath = session.sessionManager?.getSessionFile?.();
+    const creatingAgentId = this._d.getActiveAgentId();
     const unsub = session.subscribe((event) => {
-      this._d.emitEvent(event, sessionPath);
+      this._d.emitEvent(
+        event.agentId ? event : { ...event, agentId: creatingAgentId },
+        sessionPath,
+      );
     });
 
     // 存入 map（SessionEntry）— sessionEntry is the same object the resourceLoader proxy references

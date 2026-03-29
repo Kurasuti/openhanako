@@ -3,14 +3,16 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { extractZip } from "../../lib/extract-zip.js";
+import { resolveAgent } from "../utils/resolve-agent.js";
 
 /**
  * 代理分发：将 /plugins/:pluginId/* 的请求转发到对应 plugin 子 app。
  * @param {import("hono").Context} c
  * @param {import("hono").Hono} pluginApp
  * @param {string} pluginId
+ * @param {string} [agentId] - 当前 agent id，注入到子请求的 X-Hana-Agent-Id header
  */
-async function proxyToPlugin(c, pluginApp, pluginId) {
+async function proxyToPlugin(c, pluginApp, pluginId, agentId) {
   const url = new URL(c.req.url);
   const prefix = `/plugins/${pluginId}`;
   const prefixIndex = url.pathname.indexOf(prefix);
@@ -19,9 +21,12 @@ async function proxyToPlugin(c, pluginApp, pluginId) {
     : "/";
   url.pathname = subPath;
 
+  const headers = new Headers(c.req.raw.headers);
+  if (agentId) headers.set("X-Hana-Agent-Id", agentId);
+
   const subReq = new Request(url.toString(), {
     method: c.req.method,
-    headers: c.req.raw.headers,
+    headers,
     body: c.req.method !== "GET" && c.req.method !== "HEAD"
       ? c.req.raw.body
       : undefined,
@@ -199,7 +204,9 @@ export function createPluginsRoute(engine) {
     const pluginId = c.req.param("pluginId");
     const pluginApp = engine.pluginManager?.getRouteApp(pluginId);
     if (!pluginApp) return c.json({ error: `Plugin "${pluginId}" not found` }, 404);
-    return proxyToPlugin(c, pluginApp, pluginId);
+    const agent = resolveAgent(engine, c);
+    const agentId = agent?.id || engine.currentAgentId || null;
+    return proxyToPlugin(c, pluginApp, pluginId, agentId);
   });
 
   return route;
