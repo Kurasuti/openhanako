@@ -117,16 +117,16 @@ export function ChannelCreateOverlay() {
 
   return (
     <div
-      className={`agent-create-overlay${visible ? ' visible' : ''}`}
+      className={`${styles.createOverlay}${visible ? ` ${styles.createOverlayVisible}` : ''}`}
       onClick={handleOverlayClick}
     >
-      <div className="agent-create-card">
-        <h3 className="agent-create-title">{t('channel.createTitle')}</h3>
-        <div className="settings-field">
-          <label className="settings-field-label">{t('channel.createName')}</label>
+      <div className={styles.createCard}>
+        <h3 className={styles.createTitle}>{t('channel.createTitle')}</h3>
+        <div className={styles.createField}>
+          <label className={styles.createFieldLabel}>{t('channel.createName')}</label>
           <input
             ref={nameRef}
-            className="settings-input"
+            className={styles.createInput}
             type="text"
             placeholder={nameError ? t('channel.nameExists') : t('channel.createNamePlaceholder')}
             autoComplete="off"
@@ -136,8 +136,8 @@ export function ChannelCreateOverlay() {
             style={nameError ? { outline: '1.5px solid var(--danger, #c44)' } : undefined}
           />
         </div>
-        <div className="settings-field">
-          <label className="settings-field-label">{t('channel.createMembers')}</label>
+        <div className={styles.createField}>
+          <label className={styles.createFieldLabel}>{t('channel.createMembers')}</label>
           <div
             className={styles.channelCreateMembers}
             style={membersError ? { outline: '1.5px solid var(--danger, #c44)' } : undefined}
@@ -158,15 +158,15 @@ export function ChannelCreateOverlay() {
             })}
           </div>
         </div>
-        <div className="settings-field">
-          <label className="settings-field-label">
+        <div className={styles.createField}>
+          <label className={styles.createFieldLabel}>
             {t('channel.createIntro')}{' '}
             <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>
               {t('channel.createIntroOptional')}
             </span>
           </label>
           <textarea
-            className={`settings-input ${styles.channelCreateIntro}`}
+            className={`${styles.createInput} ${styles.channelCreateIntro}`}
             rows={2}
             placeholder={t('channel.createIntroPlaceholder')}
             style={{ resize: 'vertical', minHeight: '2.4rem' }}
@@ -174,11 +174,11 @@ export function ChannelCreateOverlay() {
             onChange={(e) => setIntro(e.target.value)}
           />
         </div>
-        <div className="agent-create-actions">
-          <button className="agent-create-cancel" onClick={handleCancel}>
+        <div className={styles.createActions}>
+          <button className={styles.createCancel} onClick={handleCancel}>
             {t('channel.createCancel')}
           </button>
-          <button className="agent-create-confirm" onClick={handleSubmit} disabled={creating}>
+          <button className={styles.createConfirm} onClick={handleSubmit} disabled={creating}>
             {t('channel.createConfirm')}
           </button>
         </div>

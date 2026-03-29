@@ -128,15 +128,23 @@ export async function switchSession(path: string): Promise<void> {
       }
     }
 
-    // 计算 sessionAgent
+    // 计算 sessionAgent + 同步全局 agent 上下文
+    const switchedAgent = data.agentId && data.agentId !== state.currentAgentId;
     let sessionAgent = null;
-    if (data.agentId && data.agentId !== state.currentAgentId) {
+    const agentPatch: Record<string, any> = {};
+
+    if (switchedAgent) {
       const ag = state.agents.find((a: any) => a.id === data.agentId);
       sessionAgent = {
         name: data.agentName || ag?.name || data.agentId,
         yuan: ag?.yuan || 'hanako',
         avatarUrl: ag?.hasAvatar ? hanaUrl(`/api/agents/${data.agentId}/avatar?t=${Date.now()}`) : null,
       };
+      // 同步全局 agent 上下文，避免后续切回主 agent session 时状态不一致
+      agentPatch.currentAgentId = data.agentId;
+      agentPatch.agentName = data.agentName || ag?.name || data.agentId;
+      agentPatch.agentYuan = ag?.yuan || 'hanako';
+      agentPatch.agentAvatarUrl = sessionAgent.avatarUrl;
     }
 
     // 保存当前 session 的 tab 状态
@@ -157,6 +165,7 @@ export async function switchSession(path: string): Promise<void> {
       browserRunning: !!data.browserRunning,
       browserUrl: data.browserUrl || null,
       browserThumbnail: data.browserRunning ? state.browserThumbnail : null,
+      ...agentPatch,
     });
 
     // 恢复目标 session 的 tab 状态 + 清除 quotedSelection
