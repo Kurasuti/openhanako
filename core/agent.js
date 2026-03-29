@@ -29,6 +29,7 @@ import { createExperienceTools } from "../lib/tools/experience.js";
 import { createInstallSkillTool } from "../lib/tools/install-skill.js";
 import { createNotifyTool } from "../lib/tools/notify-tool.js";
 import { createUpdateSettingsTool } from "../lib/tools/update-settings-tool.js";
+import { createAcpxTool } from "../lib/tools/acpx-tool.js";
 import { createSubagentTool } from "../lib/tools/subagent-tool.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
 import { formatSkillsForPrompt } from "@mariozechner/pi-coding-agent";
@@ -91,6 +92,7 @@ export class Agent {
     this._channelTool = null;
     this._browserTool = null;
     this._notifyTool = null;
+    this._acpxTool = null;
   }
 
   // ════════════════════════════
@@ -357,6 +359,12 @@ export class Agent {
       readOnlyBuiltinTools: READ_ONLY_BUILTIN_TOOLS,
     });
 
+    // ACPX delegate tool (executes external ACPX CLI streams)
+    this._acpxTool = createAcpxTool({
+      getConfig: () => this._engine?.getPreferences?.()?.acpx || {},
+      getCwd: () => this._engine?.homeCwd || this._engine?.cwd || process.cwd(),
+    });
+
     // 12. 组装 system prompt
     log(`  [agent] 9. buildSystemPrompt...`);
     this._systemPrompt = this.buildSystemPrompt();
@@ -438,6 +446,7 @@ export class Agent {
       this._notifyTool,
       this._updateSettingsTool,
       this._subagentTool,
+      this._acpxTool,
     ].filter(Boolean);
   }
 

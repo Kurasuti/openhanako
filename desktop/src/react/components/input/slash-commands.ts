@@ -4,7 +4,7 @@
  * 从 InputArea.tsx 提取，减少主组件体量。
  */
 
-import { hanaFetch } from '../../hooks/use-hana-fetch';
+import { hanaFetch, hanaUrl } from '../../hooks/use-hana-fetch';
 import { getWebSocket } from '../../services/websocket';
 
 // ── Xing Prompt ──
@@ -74,6 +74,126 @@ export interface SlashCommand {
   execute: () => Promise<void>;
 }
 
+export interface AcpxProgressEvent {
+  type: string;
+  ts?: number;
+  message?: string;
+  text?: string;
+  source?: string;
+  command?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  timedOut?: boolean;
+  aborted?: boolean;
+  ok?: boolean;
+  error?: string | null;
+}
+
+export interface AcpxExecutionResult {
+  ok: boolean;
+  error?: string | null;
+  aborted?: boolean;
+}
+
+function tokenizeArgs(input: string): string[] {
+  const tokens: string[] = [];
+  const re = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(input)) !== null) {
+    const value = match[1] ?? match[2] ?? match[3] ?? '';
+    tokens.push(value.replace(/\\(["'])/g, '$1'));
+  }
+  return tokens;
+}
+
+export function parseAcpxSlashCommand(rawInput: string): string[] | null {
+  const text = rawInput.trim();
+  if (!(text === '/acpx' || text.startsWith('/acpx '))) return null;
+  const rest = text.slice('/acpx'.length).trim();
+  if (!rest) return [];
+  return tokenizeArgs(rest);
+}
+
+export async function executeAcpxSlashCommand(
+  args: string[],
+  t: (key: string) => string,
+  showResult: (text: string, type: 'success' | 'error') => void,
+  setBusy: (name: string | null) => void,
+  setInput: (text: string) => void,
+  setMenuOpen: (open: boolean) => void,
+  onProgress?: (event: AcpxProgressEvent) => void,
+  signal?: AbortSignal,
+  sessionPath?: string,
+): Promise<AcpxExecutionResult> {
+  if (!args.length) {
+    showResult(t('slash.acpxUsage'), 'error');
+    return { ok: false, error: t('slash.acpxUsage') };
+  }
+
+  setBusy('acpx');
+  setInput('');
+  setMenuOpen(false);
+
+  try {
+    const payload: Record<string, unknown> = { args };
+    if (sessionPath) payload.sessionPath = sessionPath;
+    const res = await fetch(hanaUrl('/api/acpx/exec/stream'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+    if (!res.ok || !res.body) {
+      showResult(t('slash.acpxFailed'), 'error');
+      return { ok: false, error: t('slash.acpxFailed') };
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let doneEvent: AcpxProgressEvent | null = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) {
+          try {
+            const evt = JSON.parse(line) as AcpxProgressEvent;
+            onProgress?.(evt);
+            if (evt.type === 'done') doneEvent = evt;
+          } catch {
+            // ignore malformed line
+          }
+        }
+        newlineIndex = buffer.indexOf('\n');
+      }
+    }
+
+    if (!doneEvent?.ok) {
+      showResult(doneEvent?.error || t('slash.acpxFailed'), 'error');
+      return { ok: false, error: doneEvent?.error || t('slash.acpxFailed') };
+    }
+    showResult(t('slash.acpxDone'), 'success');
+    return { ok: true, error: null };
+  } catch {
+    if (signal?.aborted) {
+      showResult(t('slash.acpxStopped'), 'error');
+      return { ok: false, error: t('slash.acpxStopped'), aborted: true };
+    }
+    showResult(t('slash.acpxFailed'), 'error');
+    return { ok: false, error: t('slash.acpxFailed') };
+  } finally {
+    setBusy(null);
+  }
+}
+
 // ── Command Executors ──
 
 export function executeDiary(
@@ -123,11 +243,20 @@ export function executeCompact(
 
 export function buildSlashCommands(
   t: (key: string) => string,
+  executeAcpxFn: () => Promise<void>,
   executeDiaryFn: () => Promise<void>,
   executeXingFn: () => Promise<void>,
   executeCompactFn: () => Promise<void>,
 ): SlashCommand[] {
   return [
+    {
+      name: 'acpx',
+      label: '/acpx',
+      description: t('slash.acpx'),
+      busyLabel: t('slash.acpxBusy'),
+      icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l-5 3 5 3"/><path d="M16 9l5 3-5 3"/><path d="M14 4l-4 16"/></svg>',
+      execute: executeAcpxFn,
+    },
     {
       name: 'diary',
       label: '/diary',

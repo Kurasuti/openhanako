@@ -54,6 +54,29 @@ function createBuffer(sessionPath: string): Buffer {
 
 class StreamBufferManager {
   private buffers = new Map<string, Buffer>();
+  private acpxBashRuns = new Set<string>();
+
+  private parseAcpxFromCommand(command: unknown): { target?: string; mode?: string; task?: string } | null {
+    if (typeof command !== 'string') return null;
+    const raw = command.trim();
+    if (!raw) return null;
+    const lower = raw.toLowerCase();
+    if (!(lower.includes(' acpx ') || lower.startsWith('acpx ') || lower.includes('\\acpx') || lower.includes('/acpx'))) {
+      return null;
+    }
+
+    const target = /\bclaude\b/i.test(raw) ? 'claude' : (/\bcodex\b/i.test(raw) ? 'codex' : undefined);
+    const mode = /\bprompt\b/i.test(raw) ? 'prompt' : (/\bexec\b/i.test(raw) ? 'exec' : undefined);
+    let task = '';
+    if (target && mode) {
+      const re = new RegExp(`\\b${target}\\b[\\s\\S]*?\\b${mode}\\b\\s*`, 'i');
+      task = raw.replace(re, '').trim();
+    } else if (target) {
+      const re = new RegExp(`\\b${target}\\b\\s*`, 'i');
+      task = raw.replace(re, '').trim();
+    }
+    return { target, mode, task: task || raw };
+  }
 
   /** 获取或创建 session buffer */
   private getBuffer(sessionPath: string): Buffer {
@@ -229,6 +252,31 @@ class StreamBufferManager {
 
       case 'tool_start':
         this.ensureMessage(buf);
+        if (msg.name === 'acpx') {
+          window.dispatchEvent(new CustomEvent('hana-acpx-tool', {
+            detail: {
+              phase: 'start',
+              args: msg.args || {},
+              sessionPath,
+            },
+          }));
+        } else if (msg.name === 'bash') {
+          const parsed = this.parseAcpxFromCommand(msg.args?.command);
+          if (parsed) {
+            this.acpxBashRuns.add(sessionPath);
+            window.dispatchEvent(new CustomEvent('hana-acpx-tool', {
+              detail: {
+                phase: 'start',
+                args: {
+                  target: parsed.target,
+                  mode: parsed.mode,
+                  task: parsed.task,
+                },
+                sessionPath,
+              },
+            }));
+          }
+        }
         // 工具事件频率低，直接写 store
         this.flush(buf); // 先 flush 文本
         useStore.getState().updateLastMessage(sessionPath, (m) => {
@@ -258,6 +306,26 @@ class StreamBufferManager {
         break;
 
       case 'tool_end':
+        if (msg.name === 'acpx') {
+          window.dispatchEvent(new CustomEvent('hana-acpx-tool', {
+            detail: {
+              phase: 'end',
+              success: !!msg.success,
+              details: msg.details || {},
+              sessionPath,
+            },
+          }));
+        } else if (msg.name === 'bash' && this.acpxBashRuns.has(sessionPath)) {
+          this.acpxBashRuns.delete(sessionPath);
+          window.dispatchEvent(new CustomEvent('hana-acpx-tool', {
+            detail: {
+              phase: 'end',
+              success: !!msg.success,
+              details: msg.details || {},
+              sessionPath,
+            },
+          }));
+        }
         useStore.getState().updateLastMessage(sessionPath, (m) => {
           const blocks = [...(m.blocks || [])];
           // 从后往前找含该 tool 名且未 done 的

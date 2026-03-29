@@ -45,6 +45,7 @@ import { createBridgeRoute } from "./routes/bridge.js";
 import { createAuthRoute } from "./routes/auth.js";
 import { createDiaryRoute } from "./routes/diary.js";
 import { createConfirmRoute } from "./routes/confirm.js";
+import { createAcpxRoute } from "./routes/acpx.js";
 import { createPluginsRoute } from "./routes/plugins.js";
 // internal-browser WS is handled directly via raw ws.WebSocketServer in the
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
@@ -189,7 +190,9 @@ app.route("/api", createBridgeRoute(engine, bridgeManager));
 app.route("/api", createAuthRoute(engine));
 app.route("/api", createDiaryRoute(engine));
 app.route("/api", createConfirmRoute(confirmStore, engine));
+app.route("/api", createAcpxRoute(engine));
 app.route("/api", createPluginsRoute(engine));
+app.route("/api", createAcpxRoute(engine));
 // internal-browser WS — see unified upgrade handler in server startup below
 
 // 健康检查 + 身份信息
