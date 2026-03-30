@@ -40,7 +40,7 @@ export function createModelsRoute(engine) {
     }
   });
 
-  // 健康检测：发一个最小 completion 请求，验证模型能真正回话
+  // 健康检测：向 completion 端点发最小请求，验证模型存在且凭证有效
   route.post("/models/health", async (c) => {
     try {
       const body = await safeJson(c);
@@ -59,19 +59,32 @@ export function createModelsRoute(engine) {
         return c.json({ ok: true, status: 0, provider: resolved.provider, skipped: t("error.codexNoHealthCheck") });
       }
 
-      // 发一个真实的 max_tokens=1 completion，验证模型能回话
-      const { callText } = await import("../../core/llm-client.js");
-      await callText({
-        api: resolved.api,
-        model: resolved.model,
-        apiKey: resolved.api_key,
-        baseUrl: resolved.base_url,
-        provider: resolved.provider,
-        messages: [{ role: "user", content: "hi" }],
-        maxTokens: 1,
-        timeoutMs: 15_000,
+      // 向 completion 端点发最小请求（max_tokens=2 避免部分 provider 空响应）
+      // 只检查 HTTP 状态码，不要求返回有意义的文本
+      const { buildProviderAuthHeaders } = await import("../../lib/llm/provider-client.js");
+      const base = resolved.base_url.replace(/\/+$/, "");
+      let endpoint, headers, reqBody;
+
+      if (resolved.api === "anthropic-messages") {
+        endpoint = `${base}/v1/messages`;
+        headers = { "Content-Type": "application/json", "anthropic-version": "2023-06-01" };
+        if (resolved.api_key) headers["x-api-key"] = resolved.api_key;
+        reqBody = { model: resolved.model, max_tokens: 2, messages: [{ role: "user", content: "." }] };
+      } else {
+        endpoint = `${base}/chat/completions`;
+        headers = buildProviderAuthHeaders(resolved.api, resolved.api_key, { allowMissingApiKey: true });
+        reqBody = { model: resolved.model, max_tokens: 2, messages: [{ role: "user", content: "." }] };
+      }
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: AbortSignal.timeout(15_000),
       });
-      return c.json({ ok: true, status: 200, provider: resolved.provider });
+
+      const authOk = res.status !== 401 && res.status !== 403;
+      return c.json({ ok: authOk, status: res.status, provider: resolved.provider });
     } catch (err) {
       return c.json({ ok: false, error: err.message });
     }
