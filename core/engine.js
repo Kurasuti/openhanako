@@ -425,6 +425,7 @@ export class HanaEngine {
   _resolveExecutionModel(r) { return this._models.resolveExecutionModel(r); }
   _resolveProviderCredentials(p) { return this._models.resolveProviderCredentials(p); }
   resolveProviderCredentials(p) { return this._resolveProviderCredentials(p); }
+  resolveModelWithCredentials(ref) { return this._models.resolveModelWithCredentials(ref); }
   _inferModelProvider(id) { return this._models.inferModelProvider(id); }
   async refreshAvailableModels() { return this._models.refreshAvailable(); }
   async onProviderChanged() { return this._models.onProviderChanged(); }

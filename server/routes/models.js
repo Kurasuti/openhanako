@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
 import { t } from "../i18n.js";
-import { findModel, modelRefEquals, parseModelRef } from "../../shared/model-ref.js";
+import { modelRefEquals, parseModelRef } from "../../shared/model-ref.js";
 import { lookupKnown } from "../../shared/known-models.js";
 
 /** 查询模型显示名：overrides > SDK name > known-models > id */
@@ -47,42 +47,31 @@ export function createModelsRoute(engine) {
       const raw = body.modelId;
       if (!raw) return c.json({ error: "modelId required" }, 400);
 
-      // 统一解析：接受 {id,provider} 对象、裸字符串、或 body.provider 补充
-      const parsed = parseModelRef(raw);
-      const modelId = parsed.id;
-      const provider = body.provider || parsed.provider;
-      if (!modelId) return c.json({ error: "modelId required" }, 400);
+      const ref = parseModelRef(raw);
+      if (body.provider) ref.provider = body.provider;
+      if (!ref.id) return c.json({ error: "modelId required" }, 400);
 
-      const model = findModel(engine.availableModels, modelId, provider);
-      if (!model) return c.json({ error: `model "${modelId}" not found` }, 404);
-
-      // 凭证解析（统一路径：getCredentials 已覆盖 OAuth resourceUrl + token）
-      const creds = engine.resolveProviderCredentials(model.provider);
-
-      const baseUrl = creds.base_url || model.baseUrl || "";
-      if (!baseUrl) return c.json({ ok: false, error: "no base_url" });
-
-      const apiKey = creds.api_key;
-      if (!apiKey) return c.json({ ok: false, error: "no api_key" });
-
-      const api = creds.api || model.api || "openai-completions";
+      // 统一凭证解析（找模型 + 拿凭证一步到位）
+      const resolved = engine.resolveModelWithCredentials(ref);
 
       // Codex Responses API 无法简单探测
-      if (api === "openai-codex-responses") {
-        return c.json({ ok: true, status: 0, provider: model.provider, skipped: t("error.codexNoHealthCheck") });
+      if (resolved.api === "openai-codex-responses") {
+        return c.json({ ok: true, status: 0, provider: resolved.provider, skipped: t("error.codexNoHealthCheck") });
       }
 
       // 发一个真实的 max_tokens=1 completion，验证模型能回话
       const { callText } = await import("../../core/llm-client.js");
       await callText({
-        api, model: modelId,
-        apiKey, baseUrl,
-        provider: model.provider,
+        api: resolved.api,
+        model: resolved.model,
+        apiKey: resolved.api_key,
+        baseUrl: resolved.base_url,
+        provider: resolved.provider,
         messages: [{ role: "user", content: "hi" }],
         maxTokens: 1,
         timeoutMs: 15_000,
       });
-      return c.json({ ok: true, status: 200, provider: model.provider });
+      return c.json({ ok: true, status: 200, provider: resolved.provider });
     } catch (err) {
       return c.json({ ok: false, error: err.message });
     }
