@@ -62,23 +62,6 @@ export function AgentTab() {
     return opts;
   }, [availableModels, currentModel]);
 
-  // Image model selector
-  const imageModelRaw = settingsConfig?.models?.imageModel;
-  const currentImageModel = imageModelRaw && typeof imageModelRaw === 'object' && imageModelRaw.id
-    ? `${imageModelRaw.provider}/${imageModelRaw.id}`
-    : '';
-
-  const [availableImageModels, setAvailableImageModels] = useState<Array<{ id: string; name: string; provider: string }>>([]);
-  useEffect(() => {
-    hanaFetch('/api/plugins/image-gen/providers').then(r => r.json()).then(data => {
-      const provs: Record<string, { models: { id: string; name: string }[] }> = data.providers || {};
-      const flat = Object.entries(provs).flatMap(([pid, p]) =>
-        (p.models || []).map(m => ({ ...m, provider: pid }))
-      );
-      setAvailableImageModels(flat);
-    }).catch(() => {});
-  }, [settingsConfig]);
-
   const memoryEnabled = settingsConfig?.memory?.enabled !== false;
 
   const saveAgent = async () => {
@@ -201,41 +184,7 @@ export function AgentTab() {
           </div>
           <span className={styles['settings-field-hint']}>{t('settings.agent.chatModelHint')}</span>
         </div>
-        <div className={`${styles['settings-field']} ${styles['settings-field-center']}`}>
-          <div className={styles['model-capsule']}>
-            <span className={styles['model-capsule-label']}>{t('settings.agent.imageModel')}</span>
-            <select
-              style={{
-                fontFamily: 'inherit',
-                fontSize: '0.75rem',
-                padding: '6px 10px',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg)',
-                color: 'var(--text)',
-                flex: 1,
-              }}
-              value={currentImageModel}
-              onChange={async (e) => {
-                const val = e.target.value;
-                if (!val) {
-                  await autoSaveConfig({ models: { imageModel: null } });
-                  return;
-                }
-                const [provider, ...rest] = val.split('/');
-                await autoSaveConfig({ models: { imageModel: { id: rest.join('/'), provider } } });
-              }}
-            >
-              <option value="">{t('settings.media.followGlobal')}</option>
-              {availableImageModels.map(m => (
-                <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-                  {m.provider} / {m.name || m.id}
-                </option>
-              ))}
-            </select>
-          </div>
-          <span className={styles['settings-field-hint']}>{t('settings.agent.imageModelHint')}</span>
-        </div>
+        {/* 图片模型选择器暂时隐藏，后续重新设计 */}
       </section>
 
       {/* 关于 Ta */}
