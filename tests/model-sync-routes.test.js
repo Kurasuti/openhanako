@@ -136,6 +136,46 @@ describe("model sync related routes", () => {
     expect(data.error).toContain("api.provider is required");
   });
 
+  it("inline 空 api_key 也会同步到 provider 配置，用于真正清空凭证", async () => {
+    const { createConfigRoute } = await import("../server/routes/config.js");
+    const app = new Hono();
+    const saveProvider = vi.fn();
+    const engine = {
+      config: {},
+      configPath: "/tmp/test-config.yaml",
+      setHomeFolder: vi.fn(),
+      updateConfig: vi.fn().mockResolvedValue(undefined),
+      onProviderChanged: vi.fn().mockResolvedValue(undefined),
+      providerRegistry: {
+        saveProvider,
+        removeProvider: vi.fn(),
+      },
+      getHomeFolder: vi.fn(() => null),
+      getThinkingLevel: vi.fn(() => "medium"),
+      getSandbox: vi.fn(() => "workspace-write"),
+      getLocale: vi.fn(() => "zh-CN"),
+      getTimezone: vi.fn(() => "Asia/Shanghai"),
+      getLearnSkills: vi.fn(() => false),
+    };
+
+    app.route("/api", createConfigRoute(engine));
+
+    const res = await app.request("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api: {
+          provider: "openai",
+          api_key: "",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(saveProvider).toHaveBeenCalledWith("openai", { api_key: "" });
+    expect(engine.onProviderChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("model routes expose stable ids and readable display names", async () => {
     const { createModelsRoute } = await import("../server/routes/models.js");
     const app = new Hono();

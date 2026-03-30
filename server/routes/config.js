@@ -12,6 +12,11 @@ import { getRawConfig, clearConfigCache } from "../../lib/memory/config-loader.j
 import { FactStore } from "../../lib/memory/fact-store.js";
 import { splitByScope, injectGlobalFields } from '../../shared/config-scope.js';
 import { resolveAgent } from "../utils/resolve-agent.js";
+import {
+  buildInlineProviderCredentialUpdate,
+  clearInlineProviderCredentialFields,
+  hasInlineProviderCredentialPatch,
+} from "./provider-credentials.js";
 
 export function createConfigRoute(engine) {
   const route = new Hono();
@@ -90,19 +95,16 @@ export function createConfigRoute(engine) {
       const rawConfig = getRawConfig(engine.configPath) || {};
       for (const blockName of ["api", "embedding_api", "utility_api"]) {
         const block = agentPartial[blockName];
-        if (block?.api_key || block?.base_url) {
-          const provName = typeof block.provider === "string" && block.provider.trim()
-            ? block.provider.trim()
-            : (rawConfig?.[blockName]?.provider || "").trim();
+        if (hasInlineProviderCredentialPatch(block)) {
+          const { provider: provName, update: provUpdate } = buildInlineProviderCredentialUpdate(
+            block,
+            rawConfig?.[blockName]?.provider || "",
+          );
           if (!provName) {
             return c.json({ error: `${blockName}.provider is required when saving credentials` }, 400);
           }
-          const provUpdate = {};
-          if (block.api_key) provUpdate.api_key = block.api_key;
-          if (block.base_url) provUpdate.base_url = block.base_url;
           engine.providerRegistry.saveProvider(provName, provUpdate);
-          block.api_key = "";
-          block.base_url = "";
+          clearInlineProviderCredentialFields(block);
           providersChanged = true;
         }
       }

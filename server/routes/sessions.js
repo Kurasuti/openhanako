@@ -201,7 +201,7 @@ export function createSessionsRoute(engine) {
       await engine.switchSession(sessionPath);
 
       // 恢复目标 session 的浏览器（若有）
-      if (bm.isRunning) await bm.resumeForSession(sessionPath);
+      await bm.resumeForSession(sessionPath);
 
       return c.json({
         ok: true,
