@@ -68,6 +68,20 @@ export default [
     },
   },
 
+  // 禁止绕过 adapter 直接导入 PI SDK（后端全覆盖）
+  {
+    files: ['core/**/*.js', 'lib/**/*.js', 'hub/**/*.js', 'server/**/*.js'],
+    ignores: ['lib/pi-sdk/**'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['@mariozechner/*'],
+          message: '请从 lib/pi-sdk/index.js 导入，不要直接引用 PI SDK 包。',
+        }],
+      }],
+    },
+  },
+
   // Prevent engine._ access in server routes
   {
     files: ['server/routes/**/*.js'],
