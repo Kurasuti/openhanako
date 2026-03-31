@@ -21,10 +21,11 @@ interface Props {
   tabs: TabItem[];
   currentTab: TabType;
   onSelect: (tab: TabType) => void;
+  onPin?: (tab: TabType) => void;
   onContextMenu?: (e: React.MouseEvent, tab: TabType) => void;
 }
 
-export function PluginTabOverflow({ tabs, currentTab, onSelect, onContextMenu }: Props) {
+export function PluginTabOverflow({ tabs, currentTab, onSelect, onPin, onContextMenu }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -33,8 +34,8 @@ export function PluginTabOverflow({ tabs, currentTab, onSelect, onContextMenu }:
     const onClick = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
 
   if (tabs.length === 0) return null;
@@ -70,14 +71,25 @@ export function PluginTabOverflow({ tabs, currentTab, onSelect, onContextMenu }:
             <div className={s.divider} />
           )}
           {hiddenTabs.map(tab => (
-            <button
-              key={tab.id}
-              className={`${s.dropdownItem} ${s.dropdownItemHidden}`}
-              onClick={() => { onSelect(tab.id); setOpen(false); }}
-              onContextMenu={(e) => { onContextMenu?.(e, tab.id); setOpen(false); }}
-            >
-              {tab.label}
-            </button>
+            <div key={tab.id} className={s.dropdownRow}>
+              <button
+                className={`${s.dropdownItem} ${s.dropdownItemHidden}`}
+                onClick={() => { onSelect(tab.id); setOpen(false); }}
+              >
+                {tab.label}
+              </button>
+              {onPin && (
+                <button
+                  className={s.pinBtn}
+                  title="固定到标签栏"
+                  onClick={(e) => { e.stopPropagation(); onPin(tab.id); setOpen(false); }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 1 1 0 0 0 1-1V4H7v1a1 1 0 0 0 1 1 1 1 0 0 1 1 1z"/>
+                  </svg>
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}

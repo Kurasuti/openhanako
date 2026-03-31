@@ -259,23 +259,18 @@ export function ChannelTabBar() {
           tabs={overflowItems}
           currentTab={currentTab}
           onSelect={(tab) => {
-            // If it's a hidden tab, show it first
             const isHidden = hiddenPages.some(p => `plugin:${p.pluginId}` === tab);
             if (isHidden) showPluginTab(tab);
             handleTabClick(tab);
           }}
+          onPin={(tab) => showPluginTab(tab)}
           onContextMenu={(e, tab) => {
             if (typeof tab !== 'string' || !tab.startsWith('plugin:')) return;
             e.preventDefault();
-            const pluginId = tab.slice(7);
-            const isHidden = hiddenPluginTabs.includes(pluginId);
             const label = getTabLabel(tab, pluginPages, locale);
             setMenu({
               position: { x: e.clientX, y: e.clientY },
-              items: [isHidden
-                ? { label: `固定「${label}」`, action: () => showPluginTab(tab) }
-                : { label: `取消固定「${label}」`, action: () => hidePluginTab(tab) }
-              ],
+              items: [{ label: `取消固定「${label}」`, action: () => hidePluginTab(tab) }],
             });
           }}
         />

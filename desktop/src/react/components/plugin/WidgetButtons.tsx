@@ -29,23 +29,17 @@ export function WidgetButtons() {
     const onClick = (e: MouseEvent) => {
       if (!dropdownRef.current?.contains(e.target as Node)) setDropdownOpen(false);
     };
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
   }, [dropdownOpen]);
 
+  // Right-click on pinned widget → unpin
   const handleContextPinned = useCallback((e: React.MouseEvent, pluginId: string, title: string) => {
     e.preventDefault();
+    e.stopPropagation();
     setMenu({
       position: { x: e.clientX, y: e.clientY },
       items: [{ label: `取消固定「${title}」`, action: () => unpinWidget(pluginId) }],
-    });
-  }, []);
-
-  const handleContextUnpinned = useCallback((e: React.MouseEvent, pluginId: string, title: string) => {
-    e.preventDefault();
-    setMenu({
-      position: { x: e.clientX, y: e.clientY },
-      items: [{ label: `固定「${title}」到标题栏`, action: () => pinWidget(pluginId) }],
     });
   }, []);
 
@@ -55,6 +49,7 @@ export function WidgetButtons() {
 
   return (
     <div className={s.container}>
+      {/* Pinned widgets: individual buttons, right-click to unpin */}
       {pinnedWidgets.map(id => {
         const w = widgets.find(x => x.pluginId === id);
         if (!w) return null;
@@ -75,6 +70,7 @@ export function WidgetButtons() {
         );
       })}
 
+      {/* Dropdown for unpinned widgets — pin icon inline */}
       {unpinnedWidgets.length > 0 && (
         <div ref={dropdownRef} style={{ position: 'relative' }}>
           <button className={s.btn} title="插件" onClick={() => setDropdownOpen(!dropdownOpen)}>
@@ -87,11 +83,21 @@ export function WidgetButtons() {
               {unpinnedWidgets.map(w => {
                 const title = resolvePluginTitle(w.title, locale, w.pluginId);
                 return (
-                  <button key={w.pluginId} className={s.dropdownItem}
-                    onClick={() => { openWidget(w.pluginId); setDropdownOpen(false); }}
-                    onContextMenu={(e) => { handleContextUnpinned(e, w.pluginId, title); setDropdownOpen(false); }}>
-                    {title}
-                  </button>
+                  <div key={w.pluginId} className={s.dropdownRow}>
+                    <button className={s.dropdownItem}
+                      onClick={() => { openWidget(w.pluginId); setDropdownOpen(false); }}>
+                      {title}
+                    </button>
+                    <button
+                      className={s.pinBtn}
+                      title="固定到标题栏"
+                      onClick={(e) => { e.stopPropagation(); pinWidget(w.pluginId); setDropdownOpen(false); }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 1 1 0 0 0 1-1V4H7v1a1 1 0 0 0 1 1 1 1 0 0 1 1 1z"/>
+                      </svg>
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -99,6 +105,7 @@ export function WidgetButtons() {
         </div>
       )}
 
+      {/* Desk toggle */}
       <button
         className={`${s.btn}${jianView === 'desk' ? ` ${s.active}` : ''}`}
         title="书桌"

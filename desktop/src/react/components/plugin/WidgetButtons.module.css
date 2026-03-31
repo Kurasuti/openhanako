@@ -73,3 +73,39 @@
     background: var(--overlay-light);
     color: var(--text);
 }
+
+.dropdownRow {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.dropdownRow .dropdownItem {
+    flex: 1;
+    min-width: 0;
+}
+
+.pinBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.1s, color 0.1s, background 0.1s;
+}
+
+.dropdownRow:hover .pinBtn {
+    opacity: 1;
+}
+
+.pinBtn:hover {
+    color: var(--text);
+    background: var(--overlay-light);
+}
