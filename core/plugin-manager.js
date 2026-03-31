@@ -190,11 +190,19 @@ export class PluginManager {
             const raw = await origExecute(params, runtimeCtx ? { ...ctx, ...runtimeCtx } : ctx);
             // Pi SDK 期望 { content: ContentBlock[], details? }
             // Plugin tool 可能返回纯字符串，需要包装
+            let result;
             if (typeof raw === "string") {
-              return { content: [{ type: "text", text: raw }] };
+              result = { content: [{ type: "text", text: raw }] };
+            } else if (raw && raw.content) {
+              result = raw;
+            } else {
+              result = { content: [{ type: "text", text: String(raw ?? "") }] };
             }
-            if (raw && raw.content) return raw;
-            return { content: [{ type: "text", text: String(raw ?? "") }] };
+            // Plugin Card: auto-inject pluginId
+            if (result.details?.card && !result.details.card.pluginId) {
+              result.details.card.pluginId = ctx.pluginId;
+            }
+            return result;
           },
           _pluginId: entry.id,
         });
