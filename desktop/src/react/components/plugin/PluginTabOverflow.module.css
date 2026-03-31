@@ -72,3 +72,14 @@
     color: var(--text);
     font-weight: 500;
 }
+
+.dropdownItemHidden {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.divider {
+    height: 1px;
+    background: var(--overlay-light);
+    margin: 4px 6px;
+}

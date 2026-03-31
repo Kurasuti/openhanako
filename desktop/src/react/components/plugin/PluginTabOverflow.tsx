@@ -2,7 +2,7 @@
  * PluginTabOverflow — overflow dropdown for excess tabs in ChannelTabBar.
  *
  * Shows a "more" button that opens a dropdown listing tabs that don't fit
- * in the visible tab bar area.
+ * in the visible tab bar area, plus hidden (unpinned) plugin tabs.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -11,13 +11,20 @@ import s from './PluginTabOverflow.module.css';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
 
-interface Props {
-  tabs: { id: TabType; label: string }[];
-  currentTab: TabType;
-  onSelect: (tab: TabType) => void;
+interface TabItem {
+  id: TabType;
+  label: string;
+  hidden?: boolean;
 }
 
-export function PluginTabOverflow({ tabs, currentTab, onSelect }: Props) {
+interface Props {
+  tabs: TabItem[];
+  currentTab: TabType;
+  onSelect: (tab: TabType) => void;
+  onContextMenu?: (e: React.MouseEvent, tab: TabType) => void;
+}
+
+export function PluginTabOverflow({ tabs, currentTab, onSelect, onContextMenu }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -33,6 +40,8 @@ export function PluginTabOverflow({ tabs, currentTab, onSelect }: Props) {
   if (tabs.length === 0) return null;
 
   const hasActive = tabs.some(tab => tab.id === currentTab);
+  const normalTabs = tabs.filter(tab => !tab.hidden);
+  const hiddenTabs = tabs.filter(tab => tab.hidden);
 
   return (
     <div className={s.overflowWrap} ref={wrapRef}>
@@ -47,11 +56,25 @@ export function PluginTabOverflow({ tabs, currentTab, onSelect }: Props) {
       </button>
       {open && (
         <div className={s.dropdown}>
-          {tabs.map(tab => (
+          {normalTabs.map(tab => (
             <button
               key={tab.id}
               className={`${s.dropdownItem}${tab.id === currentTab ? ` ${s.dropdownItemActive}` : ''}`}
               onClick={() => { onSelect(tab.id); setOpen(false); }}
+              onContextMenu={(e) => { onContextMenu?.(e, tab.id); setOpen(false); }}
+            >
+              {tab.label}
+            </button>
+          ))}
+          {hiddenTabs.length > 0 && normalTabs.length > 0 && (
+            <div className={s.divider} />
+          )}
+          {hiddenTabs.map(tab => (
+            <button
+              key={tab.id}
+              className={`${s.dropdownItem} ${s.dropdownItemHidden}`}
+              onClick={() => { onSelect(tab.id); setOpen(false); }}
+              onContextMenu={(e) => { onContextMenu?.(e, tab.id); setOpen(false); }}
             >
               {tab.label}
             </button>

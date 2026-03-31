@@ -11,8 +11,9 @@ import type { TabType, PluginPageInfo } from '../../types';
 import { toggleSidebar } from '../SidebarLayout';
 import { toggleJianSidebar } from '../../stores/desk-actions';
 import { resolvePluginTitle } from '../../utils/resolve-plugin-title';
-import { reorderTabs } from '../../stores/plugin-ui-actions';
+import { reorderTabs, hidePluginTab, showPluginTab } from '../../stores/plugin-ui-actions';
 import { PluginTabOverflow } from '../plugin/PluginTabOverflow';
+import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
 import styles from './Channels.module.css';
 
 declare function t(key: string, vars?: Record<string, string | number>): string;
@@ -76,14 +77,22 @@ function getTabLabel(tab: TabType, pluginPages: PluginPageInfo[], locale: string
 
 // ── Component ──
 
+interface MenuState { items: ContextMenuItem[]; position: { x: number; y: number } }
+
 export function ChannelTabBar() {
   const currentTab = useStore(s => s.currentTab);
   const channelTotalUnread = useStore(s => s.channelTotalUnread);
   const locale = useStore(s => s.locale);
   const pluginPages = useStore(s => s.pluginPages);
   const tabOrder = useStore(s => s.tabOrder);
+  const hiddenPluginTabs = useStore(s => s.hiddenPluginTabs);
+  const [menu, setMenu] = useState<MenuState | null>(null);
 
-  const allTabs = buildTabList(pluginPages, tabOrder);
+  // Filter out hidden plugin tabs
+  const visiblePages = pluginPages.filter(p => !hiddenPluginTabs.includes(p.pluginId));
+  const hiddenPages = pluginPages.filter(p => hiddenPluginTabs.includes(p.pluginId));
+
+  const allTabs = buildTabList(visiblePages, tabOrder);
   // chat is always first and not draggable; split into visible and overflow
   const draggableTabs = allTabs.slice(1);
   const visibleDraggable = draggableTabs.slice(0, MAX_VISIBLE_DRAGGABLE);
@@ -140,6 +149,17 @@ export function ChannelTabBar() {
     switchTab(tab);
   }, []);
 
+  const handleTabContextMenu = useCallback((e: React.MouseEvent, tab: TabType) => {
+    // Only plugin tabs can be hidden
+    if (typeof tab !== 'string' || !tab.startsWith('plugin:')) return;
+    e.preventDefault();
+    const label = getTabLabel(tab, pluginPages, locale);
+    setMenu({
+      position: { x: e.clientX, y: e.clientY },
+      items: [{ label: `取消固定「${label}」`, action: () => hidePluginTab(tab) }],
+    });
+  }, [pluginPages, locale]);
+
   // ── Drag handlers ──
 
   const onDragStart = useCallback((e: React.DragEvent, tab: TabType) => {
@@ -189,11 +209,18 @@ export function ChannelTabBar() {
     setDragOverTab(null);
   }, []);
 
-  // Overflow items
-  const overflowItems = overflowDraggable.map(tab => ({
-    id: tab,
-    label: getTabLabel(tab, pluginPages, locale),
-  }));
+  // Overflow items: tabs that don't fit + hidden plugin tabs (with pin action)
+  const overflowItems = [
+    ...overflowDraggable.map(tab => ({
+      id: tab,
+      label: getTabLabel(tab, pluginPages, locale),
+    })),
+    ...hiddenPages.map(p => ({
+      id: `plugin:${p.pluginId}` as TabType,
+      label: `${resolvePluginTitle(p.title, locale, p.pluginId)}`,
+      hidden: true,
+    })),
+  ];
 
   return (
     <div className={styles.tbTabs} ref={tabsRef}>
@@ -215,6 +242,7 @@ export function ChannelTabBar() {
             data-tab={tab}
             draggable={tab !== 'chat'}
             onClick={() => handleTabClick(tab)}
+            onContextMenu={(e) => handleTabContextMenu(e, tab)}
             onDragStart={(e) => onDragStart(e, tab)}
             onDragOver={(e) => onDragOver(e, tab)}
             onDragLeave={onDragLeave}
@@ -230,9 +258,29 @@ export function ChannelTabBar() {
         <PluginTabOverflow
           tabs={overflowItems}
           currentTab={currentTab}
-          onSelect={handleTabClick}
+          onSelect={(tab) => {
+            // If it's a hidden tab, show it first
+            const isHidden = hiddenPages.some(p => `plugin:${p.pluginId}` === tab);
+            if (isHidden) showPluginTab(tab);
+            handleTabClick(tab);
+          }}
+          onContextMenu={(e, tab) => {
+            if (typeof tab !== 'string' || !tab.startsWith('plugin:')) return;
+            e.preventDefault();
+            const pluginId = tab.slice(7);
+            const isHidden = hiddenPluginTabs.includes(pluginId);
+            const label = getTabLabel(tab, pluginPages, locale);
+            setMenu({
+              position: { x: e.clientX, y: e.clientY },
+              items: [isHidden
+                ? { label: `固定「${label}」`, action: () => showPluginTab(tab) }
+                : { label: `取消固定「${label}」`, action: () => hidePluginTab(tab) }
+              ],
+            });
+          }}
         />
       )}
+      {menu && <ContextMenu items={menu.items} position={menu.position} onClose={() => setMenu(null)} />}
     </div>
   );
 }

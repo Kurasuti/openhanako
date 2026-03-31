@@ -47,7 +47,7 @@ export async function refreshPluginUI(): Promise<void> {
   }
 }
 
-/** Persist tab order and pinned widgets to preferences. */
+/** Persist tab order, pinned widgets, and hidden tabs to preferences. */
 async function savePluginPrefs(): Promise<void> {
   const s = useStore.getState();
   try {
@@ -57,6 +57,7 @@ async function savePluginPrefs(): Promise<void> {
       body: JSON.stringify({
         pluginTabOrder: s.tabOrder,
         pluginPinnedWidgets: s.pinnedWidgets,
+        pluginHiddenTabs: s.hiddenPluginTabs,
       }),
     });
   } catch (err) {
@@ -92,6 +93,26 @@ export function openWidget(pluginId: string): void {
 /** Switch jian sidebar back to desk. */
 export function openDesk(): void {
   useStore.getState().setJianView('desk');
+}
+
+/** Hide a plugin tab from the tab bar. */
+export function hidePluginTab(tabId: string): void {
+  const s = useStore.getState();
+  const pluginId = tabId.startsWith('plugin:') ? tabId.slice(7) : tabId;
+  if (!s.hiddenPluginTabs.includes(pluginId)) {
+    s.setHiddenPluginTabs([...s.hiddenPluginTabs, pluginId]);
+    // If currently viewing this tab, switch to chat
+    if (s.currentTab === `plugin:${pluginId}`) s.setCurrentTab('chat');
+    savePluginPrefs();
+  }
+}
+
+/** Show a previously hidden plugin tab. */
+export function showPluginTab(tabId: string): void {
+  const s = useStore.getState();
+  const pluginId = tabId.startsWith('plugin:') ? tabId.slice(7) : tabId;
+  s.setHiddenPluginTabs(s.hiddenPluginTabs.filter(id => id !== pluginId));
+  savePluginPrefs();
 }
 
 /** Reorder tabs (called after drag-drop). */

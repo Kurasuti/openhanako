@@ -5,11 +5,14 @@
  * and at least one widget-contributing plugin exists.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../../stores';
 import { resolvePluginTitle, resolvePluginIcon } from '../../utils/resolve-plugin-title';
-import { openWidget, openDesk } from '../../stores/plugin-ui-actions';
+import { openWidget, openDesk, pinWidget, unpinWidget } from '../../stores/plugin-ui-actions';
+import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
 import s from './WidgetButtons.module.css';
+
+interface MenuState { items: ContextMenuItem[]; position: { x: number; y: number } }
 
 export function WidgetButtons() {
   const widgets = useStore(st => st.pluginWidgets);
@@ -18,6 +21,7 @@ export function WidgetButtons() {
   const currentTab = useStore(st => st.currentTab);
   const locale = useStore(st => st.locale);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,6 +32,22 @@ export function WidgetButtons() {
     document.addEventListener('click', onClick);
     return () => document.removeEventListener('click', onClick);
   }, [dropdownOpen]);
+
+  const handleContextPinned = useCallback((e: React.MouseEvent, pluginId: string, title: string) => {
+    e.preventDefault();
+    setMenu({
+      position: { x: e.clientX, y: e.clientY },
+      items: [{ label: `取消固定「${title}」`, action: () => unpinWidget(pluginId) }],
+    });
+  }, []);
+
+  const handleContextUnpinned = useCallback((e: React.MouseEvent, pluginId: string, title: string) => {
+    e.preventDefault();
+    setMenu({
+      position: { x: e.clientX, y: e.clientY },
+      items: [{ label: `固定「${title}」到标题栏`, action: () => pinWidget(pluginId) }],
+    });
+  }, []);
 
   if (currentTab !== 'chat' || widgets.length === 0) return null;
 
@@ -47,6 +67,7 @@ export function WidgetButtons() {
             className={`${s.btn}${active ? ` ${s.active}` : ''}`}
             title={title}
             onClick={() => active ? openDesk() : openWidget(id)}
+            onContextMenu={(e) => handleContextPinned(e, id, title)}
             dangerouslySetInnerHTML={icon.type === 'svg' ? { __html: icon.content } : undefined}
           >
             {icon.type === 'text' ? icon.content : null}
@@ -67,7 +88,8 @@ export function WidgetButtons() {
                 const title = resolvePluginTitle(w.title, locale, w.pluginId);
                 return (
                   <button key={w.pluginId} className={s.dropdownItem}
-                    onClick={() => { openWidget(w.pluginId); setDropdownOpen(false); }}>
+                    onClick={() => { openWidget(w.pluginId); setDropdownOpen(false); }}
+                    onContextMenu={(e) => { handleContextUnpinned(e, w.pluginId, title); setDropdownOpen(false); }}>
                     {title}
                   </button>
                 );
@@ -86,6 +108,8 @@ export function WidgetButtons() {
           <rect x="2" y="7" width="20" height="4" rx="1"/><line x1="5" y1="11" x2="5" y2="20"/><line x1="19" y1="11" x2="19" y2="20"/>
         </svg>
       </button>
+
+      {menu && <ContextMenu items={menu.items} position={menu.position} onClose={() => setMenu(null)} />}
     </div>
   );
 }
