@@ -298,8 +298,15 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         details: event.result?.details,
       });
 
-      if (event.result?.details?._cardHint) {
-        ss._cardHints.push(event.result.details._cardHint);
+      // Plugin Card: auto-emit card from tool result
+      if (event.result?.details?.card) {
+        const c = event.result.details.card;
+        const attrs = { type: c.type || "iframe", plugin: c.pluginId || "", route: c.route || "", title: c.title };
+        emitStreamEvent(sessionPath, ss, { type: "card_start", attrs });
+        if (c.description) {
+          emitStreamEvent(sessionPath, ss, { type: "card_text", delta: c.description });
+        }
+        emitStreamEvent(sessionPath, ss, { type: "card_end" });
       }
 
       // COMPAT(v0.78): present_files → stage_files, remove after v0.90

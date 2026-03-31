@@ -33,6 +33,10 @@ export interface HistoryApiResponse {
     content: string;
     language?: string;
   }>;
+  cards?: Array<{
+    afterIndex: number;
+    card: { type: string; pluginId: string; route: string; title?: string; description?: string };
+  }>;
   todos?: any[];
   hasMore?: boolean;
 }
@@ -42,15 +46,19 @@ export interface HistoryApiResponse {
 export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] {
   const items: ChatListItem[] = [];
 
-  // 按 afterIndex 分组 fileOutputs 和 artifacts
+  // 按 afterIndex 分组 fileOutputs、artifacts、cards
   const fileMap: Record<number, Array<{ filePath: string; label: string; ext: string }>> = {};
   const artMap: Record<number, Array<{ artifactId: string; artifactType: string; title: string; content: string; language?: string }>> = {};
+  const cardMap: Record<number, Array<{ type: string; pluginId: string; route: string; title?: string; description?: string }>> = {};
 
   for (const fo of (data.fileOutputs || [])) {
     (fileMap[fo.afterIndex] ??= []).push(...fo.files);
   }
   for (const ar of (data.artifacts || [])) {
     (artMap[ar.afterIndex] ??= []).push(ar);
+  }
+  for (const cd of (data.cards || [])) {
+    (cardMap[cd.afterIndex] ??= []).push(cd.card);
   }
 
   for (let i = 0; i < data.messages.length; i++) {
@@ -183,6 +191,23 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
             content: a.content,
             language: a.language,
           });
+        }
+      }
+
+      // 9. 跟在这条消息后面的 plugin cards（来自 toolResult.details.card）
+      const cds = cardMap[i];
+      if (cds) {
+        for (const cd of cds) {
+          blocks.push({
+            type: 'plugin_card',
+            card: {
+              type: cd.type || 'iframe',
+              pluginId: cd.pluginId,
+              route: cd.route,
+              title: cd.title,
+              description: cd.description || '',
+            },
+          } as any);
         }
       }
 
