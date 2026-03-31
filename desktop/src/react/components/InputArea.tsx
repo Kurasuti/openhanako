@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useStore } from '../stores';
 import { isImageFile } from '../utils/format';
 import { hanaFetch } from '../hooks/use-hana-fetch';
+import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
 import { ensureSession, loadSessions } from '../stores/session-actions';
 import { getWebSocket } from '../services/websocket';
@@ -53,7 +54,7 @@ function InputAreaInner() {
   const pendingNewSession = useStore(s => s.pendingNewSession);
   const currentSessionPath = useStore(s => s.currentSessionPath);
   const compacting = useStore(s => currentSessionPath ? s.compactingSessions.includes(currentSessionPath) : false);
-  const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? s.inlineError);
+  const inlineError = useStore(s => s.inlineErrors[s.currentSessionPath || ''] ?? null);
   const sessionTodos = useStore(s => (s.currentSessionPath && s.todosBySession[s.currentSessionPath]) || EMPTY_TODOS);
   const attachedFiles = useStore(s => s.attachedFiles);
   const docContextAttached = useStore(s => s.docContextAttached);
@@ -416,8 +417,7 @@ function InputAreaInner() {
 
   // ── Load thinking level on mount + listen for plan mode sync ──
   useEffect(() => {
-    hanaFetch('/api/config')
-      .then(r => r.json())
+    fetchConfig()
       .then(d => { if (d.thinking_level) setThinkingLevel(d.thinking_level as ThinkingLevel); })
       .catch((err: unknown) => console.warn('[InputArea] load config failed', err));
 

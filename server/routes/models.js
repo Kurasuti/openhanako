@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
 import { t } from "../i18n.js";
-import { findModel, modelRefEquals, parseModelRef } from "../../shared/model-ref.js";
+import { modelRefEquals, parseModelRef } from "../../shared/model-ref.js";
 import { lookupKnown } from "../../shared/known-models.js";
 
 /** 查询模型显示名：overrides > SDK name > known-models > id */
@@ -40,61 +40,51 @@ export function createModelsRoute(engine) {
     }
   });
 
-  // 健康检测：发一个最小请求测试模型连通性
+  // 健康检测：向 completion 端点发最小请求，验证模型存在且凭证有效
   route.post("/models/health", async (c) => {
     try {
       const body = await safeJson(c);
       const raw = body.modelId;
       if (!raw) return c.json({ error: "modelId required" }, 400);
 
-      // 统一解析：接受 {id,provider} 对象、裸字符串、或 body.provider 补充
-      const parsed = parseModelRef(raw);
-      const modelId = parsed.id;
-      const provider = body.provider || parsed.provider;
-      if (!modelId) return c.json({ error: "modelId required" }, 400);
+      const ref = parseModelRef(raw);
+      if (body.provider) ref.provider = body.provider;
+      if (!ref.id) return c.json({ error: "modelId required" }, 400);
 
-      const model = findModel(engine.availableModels, modelId, provider);
-      if (!model) return c.json({ error: `model "${modelId}" not found` }, 404);
+      // 统一凭证解析（找模型 + 拿凭证一步到位）
+      const resolved = engine.resolveModelWithCredentials(ref);
 
-      // 凭证解析：added-models.yaml → auth.json OAuth（含 resourceUrl）→ 模型对象自带 baseUrl
-      const creds = engine.resolveProviderCredentials(model.provider);
-
-      // OAuth provider 可能有 resourceUrl（实际使用的域名，可能和内置不同）
-      const oauthCred = engine.authStorage.get(model.provider);
-      const oauthBaseUrl = oauthCred?.type === "oauth" ? oauthCred.resourceUrl : "";
-
-      const baseUrl = creds.base_url || oauthBaseUrl || model.baseUrl || "";
-      if (!baseUrl) return c.json({ ok: false, error: "no base_url" });
-
-      let apiKey = creds.api_key;
-      if (!apiKey) {
-        try { apiKey = await engine.authStorage.getApiKey(model.provider); } catch {}
-      }
-      if (!apiKey) return c.json({ ok: false, error: "no api_key" });
-
-      const { buildProviderAuthHeaders, buildProbeUrl } = await import("../../lib/llm/provider-client.js");
-      const api = creds.api || model.api || "openai-completions";
-
-      // OpenAI Codex Responses API：无法通过简单请求检测（Cloudflare 反爬），跳过
-      if (api === "openai-codex-responses") {
-        return c.json({ ok: true, status: 0, provider: model.provider, skipped: t("error.codexNoHealthCheck") });
+      // Codex Responses API 无法简单探测
+      if (resolved.api === "openai-codex-responses") {
+        return c.json({ ok: true, status: 0, provider: resolved.provider, skipped: t("error.codexNoHealthCheck") });
       }
 
-      const probe = buildProbeUrl(baseUrl, api);
-      const headers = buildProviderAuthHeaders(api, apiKey);
+      // 向 completion 端点发最小请求（max_tokens=2 避免部分 provider 空响应）
+      // 只检查 HTTP 状态码，不要求返回有意义的文本
+      const { buildProviderAuthHeaders } = await import("../../lib/llm/provider-client.js");
+      const base = resolved.base_url.replace(/\/+$/, "");
+      let endpoint, headers, reqBody;
 
-      if (api === "anthropic-messages") {
-        const res = await fetch(probe.url, {
-          method: probe.method,
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ model: modelId, max_tokens: 1, messages: [{ role: "user", content: "." }] }),
-          signal: AbortSignal.timeout(10000),
-        });
-        return c.json({ ok: res.ok || res.status === 400, status: res.status, provider: model.provider });
+      if (resolved.api === "anthropic-messages") {
+        endpoint = `${base}/v1/messages`;
+        headers = { "Content-Type": "application/json", "anthropic-version": "2023-06-01" };
+        if (resolved.api_key) headers["x-api-key"] = resolved.api_key;
+        reqBody = { model: resolved.model, max_tokens: 2, messages: [{ role: "user", content: "." }] };
+      } else {
+        endpoint = `${base}/chat/completions`;
+        headers = buildProviderAuthHeaders(resolved.api, resolved.api_key, { allowMissingApiKey: true });
+        reqBody = { model: resolved.model, max_tokens: 2, messages: [{ role: "user", content: "." }] };
       }
 
-      const res = await fetch(probe.url, { headers, signal: AbortSignal.timeout(10000) });
-      return c.json({ ok: res.ok, status: res.status, provider: model.provider });
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      const authOk = res.status !== 401 && res.status !== 403;
+      return c.json({ ok: authOk, status: res.status, provider: resolved.provider });
     } catch (err) {
       return c.json({ ok: false, error: err.message });
     }

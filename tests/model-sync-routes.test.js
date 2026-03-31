@@ -8,6 +8,17 @@ vi.mock("../lib/memory/config-loader.js", () => ({
   getRawConfig: () => ({}),
 }));
 
+/** 从 providerRegistry.getCredentials 构造 engine.resolveProviderCredentials（与 ModelManager 行为一致） */
+function withResolveCreds(engine) {
+  engine.resolveProviderCredentials = (provider) => {
+    if (!provider) return { api_key: "", base_url: "", api: "" };
+    const cred = engine.providerRegistry?.getCredentials?.(provider);
+    if (cred) return { api_key: cred.apiKey || "", base_url: cred.baseUrl || "", api: cred.api || "" };
+    return { api_key: "", base_url: "", api: "" };
+  };
+  return engine;
+}
+
 describe("model sync related routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,7 +38,7 @@ describe("model sync related routes", () => {
       config: {},
       setHomeFolder: vi.fn(),
       updateConfig: vi.fn().mockResolvedValue(undefined),
-      syncModelsAndRefresh: vi.fn().mockResolvedValue(true),
+      onProviderChanged: vi.fn().mockResolvedValue(undefined),
       providerRegistry: { saveProvider, removeProvider: vi.fn(), reload },
     };
 
@@ -58,7 +69,7 @@ describe("model sync related routes", () => {
     });
     expect(clearConfigCache).toHaveBeenCalledTimes(1);
     expect(engine.updateConfig).toHaveBeenCalledWith({});
-    expect(engine.syncModelsAndRefresh).toHaveBeenCalledTimes(1);
+    expect(engine.onProviderChanged).toHaveBeenCalledTimes(1);
   });
 
   it("shared model preference updates trigger model registry sync", async () => {
@@ -125,6 +136,46 @@ describe("model sync related routes", () => {
     expect(data.error).toContain("api.provider is required");
   });
 
+  it("inline 空 api_key 也会同步到 provider 配置，用于真正清空凭证", async () => {
+    const { createConfigRoute } = await import("../server/routes/config.js");
+    const app = new Hono();
+    const saveProvider = vi.fn();
+    const engine = {
+      config: {},
+      configPath: "/tmp/test-config.yaml",
+      setHomeFolder: vi.fn(),
+      updateConfig: vi.fn().mockResolvedValue(undefined),
+      onProviderChanged: vi.fn().mockResolvedValue(undefined),
+      providerRegistry: {
+        saveProvider,
+        removeProvider: vi.fn(),
+      },
+      getHomeFolder: vi.fn(() => null),
+      getThinkingLevel: vi.fn(() => "medium"),
+      getSandbox: vi.fn(() => "workspace-write"),
+      getLocale: vi.fn(() => "zh-CN"),
+      getTimezone: vi.fn(() => "Asia/Shanghai"),
+      getLearnSkills: vi.fn(() => false),
+    };
+
+    app.route("/api", createConfigRoute(engine));
+
+    const res = await app.request("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api: {
+          provider: "openai",
+          api_key: "",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(saveProvider).toHaveBeenCalledWith("openai", { api_key: "" });
+    expect(engine.onProviderChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("model routes expose stable ids and readable display names", async () => {
     const { createModelsRoute } = await import("../server/routes/models.js");
     const app = new Hono();
@@ -151,11 +202,11 @@ describe("model sync related routes", () => {
     expect(allData.models[0].name).toBe("Gpt 5.4");
   });
 
-  it("provider fetch prefers Pi registry models for oauth providers", async () => {
+  it("oauth provider with empty baseUrl falls back to registry", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();
-    const engine = {
-      availableModels: [
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([
         {
           id: "gpt-5.4",
           name: "GPT-5.4",
@@ -163,74 +214,58 @@ describe("model sync related routes", () => {
           contextWindow: 272000,
           maxOutputTokens: 128000,
         },
-      ],
-      refreshAvailableModels: vi.fn().mockResolvedValue(undefined),
-      authStorage: {
-        getOAuthProviders: () => [{ id: "openai-codex", name: "OpenAI Codex" }],
-        getApiKey: vi.fn(),
+      ]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "", baseUrl: "", api: "openai-codex-responses" }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
       },
-      providerRegistry: { getCredentials: () => null, isOAuth: (id) => id === "openai-codex", getAuthJsonKey: (id) => id },
-      configPath: "/tmp/test-config.yaml",
-    };
+      hanakoHome: "/tmp",
+    });
 
     app.route("/api", createProvidersRoute(engine));
 
     const res = await app.request("/api/providers/fetch-models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "openai-codex",
-      }),
+      body: JSON.stringify({ name: "openai-codex" }),
     });
 
     expect(res.status).toBe(200);
-    expect(engine.refreshAvailableModels).toHaveBeenCalledTimes(1);
+    expect(engine.getRegistryModelsForProvider).toHaveBeenCalledWith("openai-codex");
     const data = await res.json();
-    expect(data).toEqual({
-      source: "registry",
-      models: [
-        {
-          id: "gpt-5.4",
-          name: "GPT-5.4",
-          context: 272000,
-          maxOutput: 128000,
-        },
-      ],
-    });
+    expect(data.source).toBe("registry");
+    expect(data.models[0].id).toBe("gpt-5.4");
   });
 
-  it("oauth provider fetch reports registry issue instead of remote /models fallback", async () => {
+  it("oauth provider with empty registry falls back to defaults", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();
-    const engine = {
-      availableModels: [],
-      refreshAvailableModels: vi.fn().mockResolvedValue(undefined),
-      authStorage: {
-        getOAuthProviders: () => [{ id: "openai-codex", name: "OpenAI Codex" }],
-        getApiKey: vi.fn(),
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "", baseUrl: "", api: "openai-codex-responses" }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: (id) => id === "openai-codex" ? ["gpt-5.4", "gpt-5.3-codex"] : [],
       },
-      providerRegistry: { getCredentials: () => null, isOAuth: (id) => id === "openai-codex", getAuthJsonKey: (id) => id },
-      configPath: "/tmp/test-config.yaml",
-    };
+      hanakoHome: "/tmp",
+    });
 
     app.route("/api", createProvidersRoute(engine));
 
     const res = await app.request("/api/providers/fetch-models", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "openai-codex",
-        base_url: "https://chatgpt.com/backend-api",
-        api: "openai-codex-responses",
-      }),
+      body: JSON.stringify({ name: "openai-codex" }),
     });
 
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.error).toContain('Pi registry has no available models for provider "openai-codex"');
+    expect(data.source).toBe("builtin");
+    expect(data.models.map(m => m.id)).toContain("gpt-5.4");
   });
 
-  it("oauth-named provider with explicit api config uses remote catalog", async () => {
+  it("provider with explicit api_key uses remote catalog", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();
     const fetchMock = vi.fn().mockResolvedValue({
@@ -244,16 +279,15 @@ describe("model sync related routes", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const engine = {
-      availableModels: [],
-      refreshAvailableModels: vi.fn().mockResolvedValue(undefined),
-      authStorage: {
-        getOAuthProviders: () => [{ id: "minimax", name: "MiniMax" }],
-        getApiKey: vi.fn(),
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => null,
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
       },
-      providerRegistry: { getCredentials: () => null, isOAuth: (id) => id === "openai-codex", getAuthJsonKey: (id) => id },
-      configPath: "/tmp/test-config.yaml",
-    };
+      hanakoHome: "/tmp",
+    });
 
     app.route("/api", createProvidersRoute(engine));
 
@@ -269,18 +303,13 @@ describe("model sync related routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(engine.refreshAvailableModels).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const data = await res.json();
-    expect(data).toEqual({
-      models: [
-        { id: "MiniMax-M2.5", name: "MiniMax-M2.5", context: 1000000, maxOutput: 80000 },
-        { id: "MiniMax-M2", name: "MiniMax-M2", context: 1000000, maxOutput: 80000 },
-      ],
-    });
+    expect(data.models).toHaveLength(2);
+    expect(data.models[0].id).toBe("MiniMax-M2.5");
   });
 
-  it("non-oauth provider fetch uses remote catalog instead of Pi runtime subset", async () => {
+  it("api-key provider with saved credentials uses remote catalog", async () => {
     const { createProvidersRoute } = await import("../server/routes/providers.js");
     const app = new Hono();
     const fetchMock = vi.fn().mockResolvedValue({
@@ -295,31 +324,15 @@ describe("model sync related routes", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const engine = {
-      availableModels: [
-        {
-          id: "qwen3.5-flash",
-          name: "Qwen3.5 Flash",
-          provider: "dashscope",
-          contextWindow: 131072,
-          maxOutputTokens: 16384,
-        },
-        {
-          id: "qwen3.5-plus",
-          name: "Qwen3.5 Plus",
-          provider: "dashscope",
-          contextWindow: 1048576,
-          maxOutputTokens: 65536,
-        },
-      ],
-      refreshAvailableModels: vi.fn().mockResolvedValue(undefined),
-      authStorage: {
-        getOAuthProviders: () => [{ id: "openai-codex", name: "OpenAI Codex" }],
-        getApiKey: vi.fn(),
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => null,
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
       },
-      providerRegistry: { getCredentials: () => null, isOAuth: (id) => id === "openai-codex", getAuthJsonKey: (id) => id },
-      configPath: "/tmp/test-config.yaml",
-    };
+      hanakoHome: "/tmp",
+    });
 
     app.route("/api", createProvidersRoute(engine));
 
@@ -334,15 +347,163 @@ describe("model sync related routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(engine.refreshAvailableModels).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const data = await res.json();
-    expect(data).toEqual({
-      models: [
-        { id: "qwen3.5-flash", name: "qwen3.5-flash", context: 131072, maxOutput: 16384 },
-        { id: "qwen3.5-plus", name: "qwen3.5-plus", context: 1048576, maxOutput: 65536 },
-        { id: "qwen3-max", name: "qwen3-max", context: 262144, maxOutput: 32768 },
-      ],
+    expect(data.models).toHaveLength(3);
+  });
+
+  it("remote 404 falls back to registry", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: "Not Found" }));
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([
+        { id: "gpt-5.4", name: "GPT-5.4", provider: "openai-codex", contextWindow: 272000, maxOutputTokens: 128000 },
+      ]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "oauth-token", baseUrl: "https://api.openai.com/v1", api: "openai-codex-responses" }),
+        getAuthJsonKey: () => "openai-codex",
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
     });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "openai-codex-oauth" }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.source).toBe("registry");
+    expect(data.models[0].id).toBe("gpt-5.4");
+  });
+
+  it("remote 401 returns error without fallback", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, statusText: "Unauthorized" }));
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn(),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "bad-key", baseUrl: "https://api.example.com/v1", api: "openai-completions" }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "some-provider" }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.error).toContain("401");
+    expect(data.models).toEqual([]);
+    expect(engine.getRegistryModelsForProvider).not.toHaveBeenCalled();
+  });
+
+  it("defaults fallback uses authJsonKey when provider ID has no defaults", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "", baseUrl: "", api: "openai-codex-responses" }),
+        getAuthJsonKey: () => "openai-codex",
+        getDefaultModels: (id) => {
+          if (id === "openai-codex") return ["gpt-5.4", "gpt-5.3-codex"];
+          return null;
+        },
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "openai-codex-oauth" }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.source).toBe("builtin");
+    expect(data.models.map(m => m.id)).toEqual(["gpt-5.4", "gpt-5.3-codex"]);
+  });
+
+  it("anthropic-messages skips remote and goes to defaults", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "sk-test", baseUrl: "https://api.anthropic.com", api: "anthropic-messages" }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: (id) => id === "anthropic" ? ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"] : [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "anthropic" }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.source).toBe("builtin");
+    expect(data.models.map(m => m.id)).toContain("claude-sonnet-4-6");
+  });
+
+  it("request body api_key overrides saved credentials", async () => {
+    const { createProvidersRoute } = await import("../server/routes/providers.js");
+    const app = new Hono();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "test-model" }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const engine = withResolveCreds({
+      getRegistryModelsForProvider: vi.fn().mockReturnValue([]),
+      providerRegistry: {
+        getCredentials: () => ({ apiKey: "saved-key", baseUrl: "https://api.example.com/v1", api: "openai-completions" }),
+        getAuthJsonKey: (id) => id,
+        getDefaultModels: () => [],
+      },
+      hanakoHome: "/tmp",
+    });
+
+    app.route("/api", createProvidersRoute(engine));
+
+    const res = await app.request("/api/providers/fetch-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "test-provider",
+        api_key: "body-key",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const fetchCall = fetchMock.mock.calls[0];
+    expect(fetchCall[1].headers["Authorization"]).toBe("Bearer body-key");
   });
 });

@@ -1,13 +1,15 @@
 /**
  * patch-pi-sdk.cjs — postinstall 补丁
  *
- * 修复 Pi SDK createAgentSession() 没有把 options.tools 作为
- * baseToolsOverride 传给 AgentSession 的问题。
+ * Patch 1: createAgentSession() → baseToolsOverride 透传（sdk.js）
  *
- * AgentSession 本身支持 baseToolsOverride，但 createAgentSession()
- * 只取了 tool name 列表，丢弃了实际的 tool 对象，导致 session
- * 回退到 SDK 内置默认工具。Windows 上内置 bash 工具找不到 shell，
- * 所有命令返回 exit code 1 + 空输出。
+ * 注：空 tools 数组剥离（原 patch 2）已迁移至 engine.js 的
+ *     before_provider_request extension，不再需要源码补丁。
+ *
+ * 安全机制：
+ *   - 版本白名单守卫：未验证版本直接中断 npm install
+ *   - 结构验证：patch 后回读确认生效
+ *   - 直接引用扫描：检测绕过 adapter 的 SDK 导入
  *
  * See: https://github.com/anthropics/openhanako/issues/221
  */
@@ -15,78 +17,88 @@
 const fs = require("fs");
 const path = require("path");
 
-const target = path.join(
-  __dirname, "..",
-  "node_modules", "@mariozechner", "pi-coding-agent",
-  "dist", "core", "sdk.js"
-);
+const sdkRoot = path.join(__dirname, "..", "node_modules", "@mariozechner", "pi-coding-agent");
 
-if (!fs.existsSync(target)) {
-  console.log("[patch-pi-sdk] sdk.js not found, skipping");
+// ── 版本守卫 ──
+
+const VERIFIED_VERSIONS = ["0.64.0"];
+
+if (!fs.existsSync(sdkRoot)) {
+  console.log("[patch-pi-sdk] SDK not installed, skipping");
   process.exit(0);
 }
 
-let code = fs.readFileSync(target, "utf8");
-
-if (code.includes("baseToolsOverride")) {
-  console.log("[patch-pi-sdk] sdk.js already patched, skipping patch 1");
-} else {
-
-const needle = "        initialActiveToolNames,\n        extensionRunnerRef,";
-const replacement =
-  "        initialActiveToolNames,\n" +
-  "        baseToolsOverride: options.tools\n" +
-  "            ? Object.fromEntries(options.tools.map(t => [t.name, t]))\n" +
-  "            : undefined,\n" +
-  "        extensionRunnerRef,";
-
-if (!code.includes(needle)) {
-  console.warn(
-    "[patch-pi-sdk] sdk.js structure changed, cannot apply patch 1 " +
-    "— custom bash tools may not work on Windows"
+const pkg = JSON.parse(fs.readFileSync(path.join(sdkRoot, "package.json"), "utf8"));
+if (!VERIFIED_VERSIONS.includes(pkg.version)) {
+  console.error(
+    `[patch-pi-sdk] SDK 版本 ${pkg.version} 未经验证。\n` +
+    `已验证版本：${VERIFIED_VERSIONS.join(", ")}。\n` +
+    `请先测试 patch 兼容性再添加到 VERIFIED_VERSIONS。`
   );
+  process.exit(1);
+}
+
+// ── Patch 1: baseToolsOverride 透传 ──
+
+const sdkTarget = path.join(sdkRoot, "dist", "core", "sdk.js");
+let sdkCode = fs.readFileSync(sdkTarget, "utf8");
+
+if (sdkCode.includes("baseToolsOverride")) {
+  console.log("[patch-pi-sdk] patch 1 already applied, skipping");
 } else {
+  const needle = "        initialActiveToolNames,\n        extensionRunnerRef,";
+  const replacement =
+    "        initialActiveToolNames,\n" +
+    "        baseToolsOverride: options.tools\n" +
+    "            ? Object.fromEntries(options.tools.map(t => [t.name, t]))\n" +
+    "            : undefined,\n" +
+    "        extensionRunnerRef,";
 
-  code = code.replace(needle, replacement);
-  fs.writeFileSync(target, code, "utf8");
-  console.log("[patch-pi-sdk] patched createAgentSession → baseToolsOverride wired through");
-}}
+  if (!sdkCode.includes(needle)) {
+    console.error("[patch-pi-sdk] patch 1 needle not found — sdk.js structure changed");
+    process.exit(1);
+  }
 
-// ── Patch 2: pi-ai openai-completions.js ──
-// dashscope/volcengine 等 API 不接受 tools: []（空数组返回 400）。
-// Pi SDK 在对话历史有 tool_calls 但当前 turn 无工具时发 tools: []，
-// 这是为了兼容 Anthropic proxy，但对其他 API 有害。
-// 补丁：发请求前删除空 tools 数组。
-const completionsTarget = path.join(
-  __dirname, "..",
-  "node_modules", "@mariozechner", "pi-ai",
-  "dist", "providers", "openai-completions.js"
-);
+  sdkCode = sdkCode.replace(needle, replacement);
+  fs.writeFileSync(sdkTarget, sdkCode, "utf8");
+  console.log("[patch-pi-sdk] patch 1 applied: baseToolsOverride wired through");
+}
 
-if (fs.existsSync(completionsTarget)) {
-  let completionsCode = fs.readFileSync(completionsTarget, "utf8");
+// 验证 patch 1
+const verifiedSdk = fs.readFileSync(sdkTarget, "utf8");
+if (!verifiedSdk.includes("baseToolsOverride")) {
+  console.error("[patch-pi-sdk] patch 1 verification failed: baseToolsOverride not found after patching");
+  process.exit(1);
+}
 
-  if (completionsCode.includes("/* patched: strip empty tools */")) {
-    console.log("[patch-pi-sdk] openai-completions.js already patched, skipping");
-  } else {
-    // 在 tools: [] 赋值之后，tool_choice 赋值之前，插入清理逻辑
-    const toolsNeedle = '        params.tools = [];\n    }\n    if (options?.toolChoice) {';
-    const toolsReplacement =
-      '        params.tools = [];\n    }\n' +
-      '    /* patched: strip empty tools */\n' +
-      '    if (Array.isArray(params.tools) && params.tools.length === 0) {\n' +
-      '        delete params.tools;\n' +
-      '    }\n' +
-      '    if (options?.toolChoice) {';
+// ── 直接引用扫描 ──
+// 检测 lib/pi-sdk/ 之外是否有文件直接 import "@mariozechner/"
 
-    if (completionsCode.includes(toolsNeedle)) {
-      completionsCode = completionsCode.replace(toolsNeedle, toolsReplacement);
-      fs.writeFileSync(completionsTarget, completionsCode, "utf8");
-      console.log("[patch-pi-sdk] patched openai-completions.js → strip empty tools array");
-    } else {
-      console.warn("[patch-pi-sdk] openai-completions.js structure changed, cannot apply empty-tools patch");
+const SCAN_DIRS = ["core", "server", "lib", "hub"].map(d => path.join(__dirname, "..", d));
+const ADAPTER_DIR = path.join(__dirname, "..", "lib", "pi-sdk");
+const SDK_PATTERN = /@mariozechner\//;
+let leaks = 0;
+
+function scanDir(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (full === ADAPTER_DIR || entry.name === "node_modules") continue;
+      scanDir(full);
+    } else if (entry.name.endsWith(".js") || entry.name.endsWith(".mjs")) {
+      const content = fs.readFileSync(full, "utf8");
+      if (SDK_PATTERN.test(content)) {
+        console.warn(`[patch-pi-sdk] WARN: direct SDK reference in ${path.relative(path.join(__dirname, ".."), full)}`);
+        leaks++;
+      }
     }
   }
-} else {
-  console.log("[patch-pi-sdk] openai-completions.js not found, skipping");
 }
+
+for (const d of SCAN_DIRS) scanDir(d);
+if (leaks > 0) {
+  console.warn(`[patch-pi-sdk] ${leaks} file(s) bypass adapter — migrate to lib/pi-sdk/index.js`);
+}
+
+console.log("[patch-pi-sdk] all patches verified ✓");

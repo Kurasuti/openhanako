@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import { AttachmentChip } from '../shared/AttachmentChip';
 import styles from './InputArea.module.css';
 
-export function AttachedFilesBar({ files, onRemove }: {
+export const AttachedFilesBar = memo(function AttachedFilesBar({ files, onRemove }: {
   files: Array<{ path: string; name: string; isDirectory?: boolean }>;
   onRemove: (index: number) => void;
 }) {
@@ -17,7 +18,7 @@ export function AttachedFilesBar({ files, onRemove }: {
       ))}
     </div>
   );
-}
+});
 
 function FolderIcon() {
   return (

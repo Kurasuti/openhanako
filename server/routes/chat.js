@@ -9,7 +9,7 @@ import { MoodParser, XingParser, ThinkTagParser } from "../../core/events.js";
 import { wsSend, wsParse } from "../ws-protocol.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { t } from "../i18n.js";
-import { getLastAssistantUsage } from "@mariozechner/pi-coding-agent";
+import { getLastAssistantUsage } from "../../lib/pi-sdk/index.js";
 import { BrowserManager } from "../../lib/browser/browser-manager.js";
 import {
   createSessionStreamState,
@@ -20,6 +20,9 @@ import {
 } from "../session-stream-store.js";
 import { AppError } from "../../shared/errors.js";
 import { errorBus } from "../../shared/error-bus.js";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 
 /** tool_start 事件只广播这些 arg 字段，避免传输完整文件内容（同步维护：chat-render-shim.ts extractToolDetail） */
 const TOOL_ARG_SUMMARY_KEYS = ["file_path", "path", "command", "pattern", "url", "query", "key", "value", "action", "type", "schedule", "prompt", "label"];
@@ -59,6 +62,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       if (activeWsClients > 0) return;
 
       // 中断所有正在 streaming 的 owner session（焦点 + 后台）
+      for (const [, ss] of sessionState) ss.isAborted = true;
       debugLog()?.log("ws", `no clients for ${DISCONNECT_ABORT_GRACE_MS}ms, aborting all streaming`);
       engine.abortAllStreaming().catch(() => {});
     }, DISCONNECT_ABORT_GRACE_MS);
@@ -87,6 +91,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         hasToolCall: false,
         hasThinking: false,
         hasError: false,
+        isAborted: false,
         titleRequested: false,
         titlePreview: "",
         ...createSessionStreamState(),
@@ -263,7 +268,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         details: event.result?.details,
       });
 
-      if (event.toolName === "present_files") {
+      // COMPAT(v0.78): present_files → stage_files, remove after v0.90
+      if (event.toolName === "stage_files" || event.toolName === "present_files") {
         const details = event.result?.details || {};
         const files = details.files || [];
         if (files.length === 0 && details.filePath) {
@@ -381,6 +387,15 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       broadcast({ type: "channel_new_message", channelName: event.channelName, sender: event.sender });
     } else if (event.type === "dm_new_message") {
       broadcast({ type: "dm_new_message", from: event.from, to: event.to });
+    } else if (event.type === "message_end") {
+      // Provider 级别错误（超时、连接断开等）通过 message_end 传递，不经过 message_update
+      if (!ss) return;
+      if (event.message?.stopReason === "error") {
+        ss.hasError = true;
+        if (isActive) {
+          broadcast({ type: "error", message: event.message.errorMessage || "Unknown error", sessionPath });
+        }
+      }
     } else if (event.type === "turn_end") {
       if (!ss) return;
       // 关闭结构化 thinking（如有）——必须在 flush 之前，否则前端收不到 thinking_end
@@ -458,7 +473,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       });
 
       // 空回复检测：本轮没有文本输出也没有工具调用，提示用户检查配置
-      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && isActive) {
+      // 被 abort 的 turn 不弹此提示（用户主动停止 / WS 断开 / 连接超时）
+      if (!ss.hasOutput && !ss.hasToolCall && !ss.hasThinking && !ss.hasError && !ss.isAborted && isActive) {
         broadcast({ type: "error", message: t("error.modelNoResponse"), sessionPath });
       }
 
@@ -485,6 +501,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss.hasToolCall = false;
       ss.hasThinking = false;
       ss.hasError = false;
+      ss.isAborted = false;
       ss.thinkTagParser.reset();
       ss.moodParser.reset();
       ss.xingParser.reset();
@@ -529,6 +546,8 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           (async () => {
             if (msg.type === "abort") {
               const abortPath = msg.sessionPath || engine.currentSessionPath;
+              const abortSs = getState(abortPath);
+              if (abortSs) abortSs.isAborted = true;
               if (engine.isSessionStreaming(abortPath)) {
                 try { await hub.abort(abortPath); } catch {}
               }
@@ -656,6 +675,20 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                   }
                 }
               }
+              // 将用户上传的图片持久化到本地，以便工具（如图生图）引用
+              const savedImagePaths = [];
+              if (msg.images?.length && engine.hanakoHome) {
+                const attachDir = path.join(engine.hanakoHome, "attachments");
+                fs.mkdirSync(attachDir, { recursive: true });
+                for (const img of msg.images) {
+                  const ext = (img.mimeType || "image/png").split("/")[1] || "png";
+                  const hash = crypto.createHash("md5").update(img.data.slice(0, 1024)).digest("hex").slice(0, 8);
+                  const filePath = path.join(attachDir, `upload-${Date.now()}-${hash}.${ext}`);
+                  fs.writeFileSync(filePath, Buffer.from(img.data, "base64"));
+                  savedImagePaths.push(filePath);
+                }
+              }
+
               // 非 vision 模型：静默剥离图片，只发文字。不拦截、不报错。
               // vision 未知（undefined）的模型：放行，让 API 决定。
               const curModel = engine.currentModel;
@@ -664,6 +697,11 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               }
               // 只发图片没文字时补一个占位文本，防止空 text 导致某些 API 异常
               let promptText = msg.text || "";
+              // 在消息文本前附注图片本地路径，供工具（如图生图）引用
+              if (savedImagePaths.length) {
+                const pathNote = savedImagePaths.map(p => `[attached_image: ${p}]`).join("\n");
+                promptText = `${pathNote}\n${promptText}`;
+              }
               if (!promptText.trim() && msg.images?.length) {
                 promptText = t("error.viewImage");
               }
@@ -679,6 +717,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                 ss.thinkTagParser.reset();
                 ss.moodParser.reset();
                 ss.xingParser.reset();
+                ss.isAborted = false;
                 ss.titleRequested = false;
                 ss.titlePreview = "";
                 beginSessionStream(ss);

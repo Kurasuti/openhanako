@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import type { SlashCommand } from '../InputArea';
 import styles from './InputArea.module.css';
 
-export function SlashCommandMenu({ commands, selected, busy, onSelect, onHover }: {
+export const SlashCommandMenu = memo(function SlashCommandMenu({ commands, selected, busy, onSelect, onHover }: {
   commands: SlashCommand[];
   selected: number;
   busy: string | null;
@@ -25,4 +26,4 @@ export function SlashCommandMenu({ commands, selected, busy, onSelect, onHover }
       ))}
     </div>
   );
-}
+});

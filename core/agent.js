@@ -18,7 +18,7 @@ import { createDeskManager } from "../lib/desk/desk-manager.js";
 import { CronStore } from "../lib/desk/cron-store.js";
 import { createCronTool } from "../lib/tools/cron-tool.js";
 import { createWebFetchTool } from "../lib/tools/web-fetch.js";
-import { createPresentFilesTool } from "../lib/tools/output-file-tool.js";
+import { createStageFilesTool } from "../lib/tools/output-file-tool.js";
 import { createArtifactTool } from "../lib/tools/artifact-tool.js";
 import { createChannelTool } from "../lib/tools/channel-tool.js";
 import { createAskAgentTool } from "../lib/tools/ask-agent-tool.js";
@@ -32,7 +32,7 @@ import { createUpdateSettingsTool } from "../lib/tools/update-settings-tool.js";
 import { createAcpxTool } from "../lib/tools/acpx-tool.js";
 import { createSubagentTool } from "../lib/tools/subagent-tool.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
-import { formatSkillsForPrompt } from "@mariozechner/pi-coding-agent";
+import { formatSkillsForPrompt } from "../lib/pi-sdk/index.js";
 import { runCompatChecks } from "../lib/compat/index.js";
 
 export class Agent {
@@ -87,7 +87,7 @@ export class Agent {
     this._deskManager = null;
     this._cronStore = null;
     this._cronTool = null;
-    this._presentFilesTool = null;
+    this._stageFilesTool = null;
     this._artifactTool = null;
     this._channelTool = null;
     this._browserTool = null;
@@ -251,7 +251,7 @@ export class Agent {
       emitEvent: (event) => this._engine?._emitEvent(event, this._engine?._sessionCoord?.currentSessionPath),
       getSessionPath: () => this._engine?._sessionCoord?.currentSessionPath,
     });
-    this._presentFilesTool = createPresentFilesTool();
+    this._stageFilesTool = createStageFilesTool();
     this._artifactTool = createArtifactTool();
     this._browserTool = createBrowserTool();
     this._notifyTool = createNotifyTool({
@@ -436,7 +436,7 @@ export class Agent {
       this._webFetchTool,
       this._todoTool,
       this._cronTool,
-      this._presentFilesTool,
+      this._stageFilesTool,
       this._artifactTool,
       this._channelTool,
       this._askAgentTool,

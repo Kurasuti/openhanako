@@ -19,13 +19,7 @@ import { migrateConfigScope } from "../shared/migrate-config-scope.js";
 import { migrateToProvidersYaml } from "./migrate-providers.js";
 import { findModel } from "../shared/model-ref.js";
 import { PluginManager } from "./plugin-manager.js";
-import {
-  DefaultResourceLoader,
-  codingTools,
-  grepTool,
-  findTool,
-  lsTool,
-} from "@mariozechner/pi-coding-agent";
+import { DefaultResourceLoader, codingTools, grepTool, findTool, lsTool } from "../lib/pi-sdk/index.js";
 
 /** 已知的外部 AI 工具技能目录（相对 $HOME） */
 const WELL_KNOWN_SKILL_PATHS = [
@@ -431,8 +425,18 @@ export class HanaEngine {
   _resolveExecutionModel(r) { return this._models.resolveExecutionModel(r); }
   _resolveProviderCredentials(p) { return this._models.resolveProviderCredentials(p); }
   resolveProviderCredentials(p) { return this._resolveProviderCredentials(p); }
+  resolveModelWithCredentials(ref) { return this._models.resolveModelWithCredentials(ref); }
   _inferModelProvider(id) { return this._models.inferModelProvider(id); }
   async refreshAvailableModels() { return this._models.refreshAvailable(); }
+  /**
+   * Provider 配置变更后的统一操作序列。
+   * reload registry → sync models.json → refresh available → normalize utility prefs
+   */
+  async onProviderChanged() {
+    await this._models.reloadAndSync();
+    this._configCoord.normalizeUtilityApiPreferences();
+  }
+  getRegistryModelsForProvider(name) { return this._models.getRegistryModelsForProvider(name); }
 
   static SHARED_MODEL_KEYS = SHARED_MODEL_KEYS;
 
@@ -501,6 +505,18 @@ export class HanaEngine {
       noPromptTemplates: true,
       noThemes: true,
       additionalSkillPaths: [skillsDir],
+      extensionFactories: this._extensionFactories = [
+        /** 剥离空 tools 数组 — dashscope / volcengine 不接受 tools: [] */
+        (pi) => {
+          pi.on("before_provider_request", (event) => {
+            const p = event.payload;
+            if (p && Array.isArray(p.tools) && p.tools.length === 0) {
+              delete p.tools;
+            }
+            return p;
+          });
+        },
+      ],
     });
     await this._resourceLoader.reload();
 
@@ -596,15 +612,33 @@ export class HanaEngine {
     this._pluginManager.scan();
     await this._pluginManager.loadAll();
 
-    // Register plugin skill paths with SkillManager
+    // Register plugin skill paths with SkillManager and re-sync agent skills
     if (this._skills) {
       const existing = this._skills._externalPaths || [];
       const pluginPaths = this._pluginManager.getSkillPaths();
       this._skills.setExternalPaths([...existing, ...pluginPaths]);
+      this._syncAllAgentSkills();
     }
+
+    // Inject plugin extension factories into ResourceLoader (same array reference)
+    this._syncExtensionFactories();
+  }
+
+  /**
+   * 同步插件 extension factories 到 ResourceLoader 共享数组。
+   * 原地 splice 保持数组引用不变（DefaultResourceLoader 持有同一引用）。
+   * 在 initPlugins 以及任何插件热操作后调用。
+   */
+  _syncExtensionFactories() {
+    if (!this._pluginManager || !this._extensionFactories) return;
+    // 保留首个内置 factory（空 tools 剥离），替换后续所有插件 factory
+    this._extensionFactories.splice(1, Infinity, ...this._pluginManager.getExtensionFactories());
   }
 
   get pluginManager() { return this._pluginManager; }
+
+  /** 插件热操作后调用，同步 extension factories 到 ResourceLoader */
+  syncPluginExtensions() { this._syncExtensionFactories(); }
 
   // ════════════════════════════
   //  工具构建
@@ -614,7 +648,12 @@ export class HanaEngine {
     const ct = customTools || this.agent.tools;
     // Append plugin tools
     const pluginTools = this._pluginManager?.getAllTools() || [];
-    const allTools = [...ct, ...pluginTools];
+    const agentId = this.agent?.id || (opts.agentDir ? path.basename(opts.agentDir) : "");
+    const wrappedPluginTools = pluginTools.map(t => ({
+      ...t,
+      execute: (toolCallId, params, runtimeCtx) => t.execute(toolCallId, params, { ...runtimeCtx, agentId }),
+    }));
+    const allTools = [...ct, ...wrappedPluginTools];
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;
@@ -765,6 +804,6 @@ export class HanaEngine {
     "recall_experience", "record_experience",
     "web_search", "web_fetch",
     "todo", "notify",
-    "present_files",
+    "stage_files",
   ];
 }

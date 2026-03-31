@@ -50,14 +50,15 @@ export class SkillManager {
   /** 将 agent 启用的 skill 同步到 agent 的 system prompt */
   syncAgentSkills(agent) {
     const enabled = agent?.config?.skills?.enabled || [];
-    const skills = this._allSkills.filter(s => enabled.includes(s.name));
+    // Plugin skills 跟着插件走，不需要手动启用
+    const skills = this._allSkills.filter(s => s._pluginSkill || enabled.includes(s.name));
     agent.setEnabledSkills(skills);
   }
 
-  /** 返回全量 skill 列表（供 API 使用），附带指定 agent 的 enabled 状态 */
+  /** 返回全量 skill 列表（供 API 使用），附带指定 agent 的 enabled 状态。Plugin skill 不返回（UI 不显示） */
   getAllSkills(agent) {
     const enabled = agent?.config?.skills?.enabled || [];
-    return this._allSkills.map(s => ({
+    return this._allSkills.filter(s => !s._pluginSkill).map(s => ({
       name: s.name,
       description: s.description,
       filePath: s.filePath,
@@ -155,11 +156,12 @@ export class SkillManager {
   }
 
   /**
-   * 更新外部路径（纯数据更新 + 重建 watcher，不触发 reload）
+   * 更新外部路径，重新扫描外部 skill，重建 watcher
    * @param {Array<{ dirPath: string, label: string }>} paths
    */
   setExternalPaths(paths) {
     this._externalPaths = paths;
+    this._appendExternalSkills();
     this._closeExternalWatchers();
     if (this._reloadDeps) {
       this._watchExternalPaths();
@@ -196,6 +198,7 @@ export class SkillManager {
               _externalLabel: label,
               _externalPath: dirPath,
               _readonly: true,
+              _pluginSkill: label.startsWith("plugin:"),
             });
           } catch {}
         }
@@ -204,8 +207,9 @@ export class SkillManager {
     return results;
   }
 
-  /** 将外部技能追加到 _allSkills（去重：内部优先） */
+  /** 将外部技能追加到 _allSkills（去重：内部优先，先清理旧 external 再重扫） */
   _appendExternalSkills() {
+    this._allSkills = this._allSkills.filter(s => s.source !== "external");
     const existingNames = new Set(this._allSkills.map(s => s.name));
     for (const ext of this.scanExternalSkills()) {
       if (!existingNames.has(ext.name)) {

@@ -6,7 +6,7 @@ import path from "path";
 import os from "os";
 import { Hono } from "hono";
 import { safeJson } from "../hono-helpers.js";
-import { buildProviderAuthHeaders, buildProbeUrl } from "../../lib/llm/provider-client.js";
+import { buildProviderAuthHeaders, probeProvider } from "../../lib/llm/provider-client.js";
 
 // ── Models-cache helpers ──
 
@@ -79,14 +79,6 @@ export function createProvidersRoute(engine) {
     // OAuth 自定义模型
     const oauthCustom = engine.preferences.getOAuthCustomModels();
 
-    // SDK 可用模型（含 OAuth 注入的）
-    const sdkModels = engine.availableModels || [];
-    const sdkByProvider = new Map();
-    for (const m of sdkModels) {
-      if (!sdkByProvider.has(m.provider)) sdkByProvider.set(m.provider, []);
-      sdkByProvider.get(m.provider).push(m.id);
-    }
-
     const result = {};
 
     // OAuth 登录信息查找（oauthLoginMap 用 authJsonKey 索引）
@@ -101,11 +93,8 @@ export function createProvidersRoute(engine) {
     for (const [name, p] of Object.entries(providers)) {
       const isOAuth = provRegistry.isOAuth(name);
       const oauthInfo = getOAuthLoginInfo(name);
-      const sdkIds = sdkByProvider.get(name) || [];
-      // 合并 added-models.yaml 条目 + SDK 发现的模型 ID，按 ID 去重（保留原始对象形式）
+      // added-models.yaml 是模型列表的唯一信源
       const rawModels = p.models || [];
-      const seenIds = new Set(rawModels.map(m => typeof m === "object" ? m.id : m));
-      const allModels = [...rawModels, ...sdkIds.filter(id => !seenIds.has(id))];
       const customModels = oauthCustom[name] || [];
 
       result[name] = {
@@ -114,7 +103,7 @@ export function createProvidersRoute(engine) {
         base_url: p.base_url || "",
         api: p.api || "",
         api_key: p.api_key || "",
-        models: allModels,
+        models: rawModels,
         custom_models: customModels,
         has_credentials: !!(p.api_key || (isOAuth && oauthInfo?.loggedIn)),
         logged_in: isOAuth ? !!oauthInfo?.loggedIn : undefined,
@@ -131,7 +120,6 @@ export function createProvidersRoute(engine) {
       const authKey = provRegistry.getAuthJsonKey(oauthId);
       const loginInfo = oauthLoginMap.get(authKey);
       if (!loginInfo) continue;
-      const sdkIds = sdkByProvider.get(authKey) || sdkByProvider.get(oauthId) || [];
       const customModels = oauthCustom[authKey] || oauthCustom[oauthId] || [];
       result[oauthId] = {
         type: "oauth",
@@ -139,7 +127,7 @@ export function createProvidersRoute(engine) {
         base_url: "",
         api: "",
         api_key: "",
-        models: sdkIds,
+        models: [],
         custom_models: customModels,
         has_credentials: !!loginInfo.loggedIn,
         logged_in: !!loginInfo.loggedIn,
@@ -155,14 +143,13 @@ export function createProvidersRoute(engine) {
       for (const [id, entry] of provRegistry.getAll()) {
         if (result[id]) continue;
         if (entry.authType === "oauth") continue; // OAuth provider 走上面的白名单逻辑
-        const sdkIds = sdkByProvider.get(id) || [];
         result[id] = {
           type: "api-key",
           display_name: entry.displayName || id,
           base_url: entry.baseUrl || "",
           api: entry.api || "",
           api_key: "",
-          models: sdkIds,
+          models: [],
           custom_models: [],
           has_credentials: false,
           logged_in: undefined,
@@ -187,9 +174,38 @@ export function createProvidersRoute(engine) {
     }));
   }
 
+  /** Registry → defaults 两级 fallback，fetch-models 和 Anthropic 路径共用 */
+  function registryOrDefaultsFallback(name) {
+    if (!name) {
+      return { error: "name is required for model discovery fallback", models: [] };
+    }
+
+    // 尝试 Pi SDK registry（含内置 OAuth 模型 + models.json 模型，不经过 availableModels 白名单）
+    const registryModels = engine.getRegistryModelsForProvider(name);
+    if (registryModels.length > 0) {
+      const normalized = normalizeRegistryModels(registryModels);
+      saveToCache(name, normalized);
+      return { source: "registry", models: normalized };
+    }
+
+    // 回退到 default-models.json（用 authJsonKey 兜底，如 openai-codex-oauth → openai-codex）
+    const authKey = engine.providerRegistry.getAuthJsonKey(name);
+    const defaults = engine.providerRegistry.getDefaultModels(name)
+      || engine.providerRegistry.getDefaultModels(authKey)
+      || [];
+    if (defaults.length > 0) {
+      const builtinModels = defaults.map(id => ({ id, name: id, context: null, maxOutput: null }));
+      saveToCache(name, builtinModels);
+      return { source: "builtin", models: builtinModels };
+    }
+
+    return { error: `No models found for provider "${name}"`, models: [] };
+  }
+
   /**
-   * 从供应商的 /v1/models (OpenAI 兼容) 端点拉取模型列表
-   * body: { name, base_url, api, api_key? }
+   * 从供应商拉取模型列表
+   * 统一瀑布流：凭证解析 → 远程 GET /models → registry fallback → defaults fallback
+   * body: { name, base_url?, api?, api_key? }
    */
   route.post("/providers/fetch-models", async (c) => {
     const body = await safeJson(c);
@@ -198,112 +214,59 @@ export function createProvidersRoute(engine) {
       return c.json({ error: "name or base_url is required" }, 400);
     }
 
-    const savedProvider = name ? (() => {
-      const cred = engine.providerRegistry.getCredentials(name);
-      if (!cred) return {};
-      return { api_key: cred.apiKey, base_url: cred.baseUrl, api: cred.api };
-    })() : {};
-    const savedKey = savedProvider.api_key || "";
-    const effectiveBaseUrl = base_url || savedProvider.base_url || "";
-    const effectiveApi = explicitApi || savedProvider.api || "";
-    const hasExplicitRemoteConfig = !!(effectiveBaseUrl && effectiveApi && (api_key || savedKey));
+    // ── 1. 凭证解析：请求体 > resolveProviderCredentials（统一路径） ──
+    const saved = name ? engine.resolveProviderCredentials(name) : { api_key: "", base_url: "", api: "" };
 
-    const isOAuthProvider = !!name && engine.providerRegistry.isOAuth(name);
+    const effectiveKey = api_key || saved.api_key || "";
+    const effectiveBaseUrl = base_url || saved.base_url || "";
+    const effectiveApi = explicitApi || saved.api || "";
 
-    if (isOAuthProvider && !hasExplicitRemoteConfig) {
+    // ── 2. Anthropic 快速路径（没有 /models 端点）──
+    if (effectiveApi === "anthropic-messages") {
+      return c.json(registryOrDefaultsFallback(name));
+    }
+
+    // ── 3. 远程 GET /models（baseUrl 为空时跳过）──
+    if (effectiveBaseUrl) {
       try {
-        await engine.refreshAvailableModels();
-        // Pi SDK 用 authJsonKey 作为 model.provider，需要两个 ID 都匹配
-        const authKey = engine.providerRegistry.getAuthJsonKey(name);
-        const registryModels = engine.availableModels.filter(
-          (model) => model.provider === name || model.provider === authKey,
-        );
-        if (registryModels.length > 0) {
-          const normalized = normalizeRegistryModels(registryModels);
-          saveToCache(name, normalized);
-          return c.json({ source: "registry", models: normalized });
+        const url = effectiveBaseUrl.replace(/\/+$/, "") + "/models";
+        let headers = { "Content-Type": "application/json" };
+        if (effectiveKey) {
+          if (!effectiveApi) {
+            return c.json({ error: "api is required when api_key is present", models: [] });
+          }
+          headers = buildProviderAuthHeaders(effectiveApi, effectiveKey);
         }
-
-        return c.json({
-          error: `Pi registry has no available models for provider "${name}" yet. Please finish login or re-login, then try again.`,
-          models: [],
+        const res = await fetch(url, {
+          headers,
+          signal: AbortSignal.timeout(15000),
         });
-      } catch (err) {
-        return c.json({ error: err.message, models: [] });
-      }
-    }
 
-    if (!base_url) {
-      return c.json({ error: "base_url is required for remote model fetch" }, 400);
-    }
-
-    // 解析 api_key：显式传入 > providers 块 > auth.json OAuth token
-    let key = api_key || "";
-    let api = explicitApi || "";
-    if (!key && name) {
-      key = savedKey;
-      api = api || savedProvider.api || "";
-    }
-    // OAuth provider fallback：从 AuthStorage 获取 token
-    if (!key && name) {
-      try {
-        key = await engine.authStorage.getApiKey(name) || "";
-      } catch {}
-    }
-
-    // Anthropic 格式没有 /models 端点，从 Pi SDK registry 或 default-models.json 返回
-    if (api === "anthropic-messages") {
-      const registryModels = engine.modelRegistry
-        ? engine.modelRegistry.getAll().filter((m) => m.provider === name)
-        : [];
-      if (registryModels.length > 0) {
-        const normalized = normalizeRegistryModels(registryModels);
-        saveToCache(name, normalized);
-        return c.json({ source: "registry", models: normalized });
-      }
-      // fallback：从 default-models.json 返回默认模型列表
-      const defaults = engine.providerRegistry?.getDefaultModels(name) || [];
-      if (defaults.length > 0) {
-        const builtinModels = defaults.map(id => ({ id, name: id, context: null, maxOutput: null }));
-        saveToCache(name, builtinModels);
-        return c.json({ source: "builtin", models: builtinModels });
-      }
-      return c.json({ error: "No built-in models found for this provider", models: [] });
-    }
-
-    try {
-      const url = base_url.replace(/\/+$/, "") + "/models";
-      let headers = { "Content-Type": "application/json" };
-      if (key) {
-        if (!api) {
-          return c.json({ error: "api is required when api_key is present", models: [] });
+        // 401/403：凭证问题，直接返回错误，不 fallback
+        if (res.status === 401 || res.status === 403) {
+          return c.json({ error: `HTTP ${res.status}: ${res.statusText}`, models: [] });
         }
-        headers = buildProviderAuthHeaders(api, key);
+
+        if (res.ok) {
+          const data = await res.json();
+          const models = (data.data || []).map(m => ({
+            id: m.id,
+            name: m.id,
+            context: m.context_length || m.context_window || m.max_context_length || null,
+            maxOutput: m.max_completion_tokens || m.max_output_tokens || null,
+          }));
+          saveToCache(name, models);
+          return c.json({ models });
+        }
+
+        // 404 / 其他 → 进入 step 4
+      } catch {
+        // 网络错误 → 进入 step 4
       }
-      const res = await fetch(url, {
-        headers,
-        signal: AbortSignal.timeout(15000),
-      });
-
-      if (!res.ok) {
-        return c.json({ error: `HTTP ${res.status}: ${res.statusText}`, models: [] });
-      }
-
-      const data = await res.json();
-      // OpenAI 兼容格式：{ data: [{ id, ... }] }
-      // 尝试从返回里抓取上下文长度和最大输出（各 provider 扩展字段不同）
-      const models = (data.data || []).map(m => ({
-        id: m.id,
-        name: m.id,
-        context: m.context_length || m.context_window || m.max_context_length || null,
-        maxOutput: m.max_completion_tokens || m.max_output_tokens || null,
-      }));
-
-      saveToCache(name, models);
-      return c.json({ models });
-    } catch (err) {
-      return c.json({ error: err.message, models: [] });
     }
+
+    // ── 4. Registry + defaults fallback ──
+    return c.json(registryOrDefaultsFallback(name));
   });
 
   /**
@@ -320,45 +283,32 @@ export function createProvidersRoute(engine) {
 
   /**
    * 测试供应商连接
-   * body: { base_url, api, api_key }
+   * body: { name?, base_url?, api?, api_key? }
+   * 凭证解析优先级与 fetch-models 一致：请求体 > resolveProviderCredentials > 插件默认值
    */
   route.post("/providers/test", async (c) => {
     const body = await safeJson(c);
-    const { base_url, api } = body;
+    const { name } = body;
     // 清洗 API key：去除非 ASCII 字符（防止粘贴时输入法带入中文）
-    const api_key = (body.api_key || "").replace(/[^\x20-\x7E]/g, "").trim();
+    const bodyKey = (body.api_key || "").replace(/[^\x20-\x7E]/g, "").trim();
+
+    // ── 凭证解析：请求体 > resolveProviderCredentials（统一路径） ──
+    const saved = name ? engine.resolveProviderCredentials(name) : { api_key: "", base_url: "", api: "" };
+
+    const api_key = bodyKey || saved.api_key || "";
+    const base_url = body.base_url || saved.base_url || "";
+    const api = body.api || saved.api || "";
+
     if (!base_url) {
       return c.json({ error: "base_url is required" }, 400);
     }
+    if (api_key && !api) {
+      return c.json({ error: "api is required when api_key is present" }, 400);
+    }
 
     try {
-      const probe = buildProbeUrl(base_url, api);
-
-      if (api === "anthropic-messages") {
-        const headers = buildProviderAuthHeaders(api, api_key);
-        const res = await fetch(probe.url, {
-          method: probe.method,
-          headers,
-          body: JSON.stringify({ model: "test", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
-          signal: AbortSignal.timeout(10000),
-        });
-        // 401/403 = key 无效，其他错误（400 model not found 等）说明认证通过了
-        const authOk = res.status !== 401 && res.status !== 403;
-        return c.json({ ok: authOk, status: res.status });
-      }
-
-      let headers = {};
-      if (api_key) {
-        if (!api) {
-          return c.json({ error: "api is required when api_key is present" }, 400);
-        }
-        headers = buildProviderAuthHeaders(api, api_key);
-      }
-      const res = await fetch(probe.url, {
-        headers,
-        signal: AbortSignal.timeout(10000),
-      });
-      return c.json({ ok: res.ok, status: res.status });
+      const result = await probeProvider({ baseUrl: base_url, api, apiKey: api_key });
+      return c.json(result);
     } catch (err) {
       return c.json({ ok: false, error: err.message });
     }
@@ -377,8 +327,7 @@ export function createProvidersRoute(engine) {
     }
     try {
       engine.providerRegistry.updateModelEntry(providerName, modelId, body);
-      engine.providerRegistry.reload();
-      await engine.syncModelsAndRefresh();
+      await engine.onProviderChanged();
       return c.json({ ok: true });
     } catch (err) {
       const status = err.message?.includes("not found") ? 404 : 500;

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useSettingsStore, type ProviderSummary } from '../../store';
 import { hanaFetch } from '../../api';
+import { invalidateConfigCache } from '../../../hooks/use-config';
 import { t, API_FORMAT_OPTIONS } from '../../helpers';
 import { SelectWidget } from '../../widgets/SelectWidget';
 import { KeyInput } from '../../widgets/KeyInput';
+import { getApiKeySavePlan } from './api-key-save-plan';
 import styles from '../../Settings.module.css';
 
 const platform = window.platform;
@@ -37,33 +39,38 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
   }, [derivedBaseUrl, urlEdited]);
 
   const verifyAndSave = async (btn: HTMLButtonElement) => {
-    if (!keyEdited) return;
-    const key = keyVal.trim();
-    if (!key && !presetInfo?.local) return;
+    const plan = getApiKeySavePlan({
+      keyEdited,
+      keyVal,
+      urlEdited,
+      urlVal,
+      derivedBaseUrl,
+      isPresetSetup: !!isPresetSetup,
+      isLocalPreset: !!presetInfo?.local,
+      api,
+    });
+    if (!plan.shouldSave) return;
     btn.classList.add(styles['spinning']);
     try {
-      const effectiveUrl = urlVal.trim() || derivedBaseUrl;
-      const testRes = await hanaFetch('/api/providers/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_url: effectiveUrl, api, api_key: key }),
-      });
-      const testData = await testRes.json();
-      if (!testData.ok) {
-        showToast(t('settings.providers.verifyFailed'), 'error');
-        return;
+      if (plan.shouldVerify) {
+        const testRes = await hanaFetch('/api/providers/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base_url: plan.effectiveUrl, api: plan.api, api_key: plan.key }),
+        });
+        const testData = await testRes.json();
+        if (!testData.ok) {
+          showToast(t('settings.providers.verifyFailed'), 'error');
+          return;
+        }
       }
-      const payload: Record<string, unknown> = isPresetSetup
-        ? { base_url: effectiveUrl, api_key: key, api, models: [] as string[] }
-        : { api_key: key };
-      // 如果 base_url 也被编辑过，一并保存
-      if (urlEdited && !isPresetSetup) payload.base_url = effectiveUrl;
       await hanaFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providers: { [providerId]: payload } }),
+        body: JSON.stringify({ providers: { [providerId]: plan.payload } }),
       });
-      showToast(t('settings.providers.verifySuccess'), 'success');
+      invalidateConfigCache();
+      showToast(plan.shouldVerify ? t('settings.providers.verifySuccess') : t('settings.saved'), 'success');
       if (isPresetSetup) useSettingsStore.setState({ selectedProviderId: providerId });
       setKeyEdited(false);
       if (urlEdited) setUrlEdited(false);
@@ -145,6 +152,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ providers: { [providerId]: { base_url: trimmed } } }),
                 });
+                invalidateConfigCache();
                 showToast(t('settings.saved'), 'success');
                 setUrlEdited(false);
                 await onRefresh();
@@ -170,6 +178,7 @@ export function ApiKeyCredentials({ providerId, summary, providerConfig, isPrese
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ providers: { [providerId]: { api: val } } }),
                 });
+                invalidateConfigCache();
                 showToast(t('settings.saved'), 'success');
                 await onRefresh();
               } catch { /* swallow */ }

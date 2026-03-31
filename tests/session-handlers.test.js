@@ -350,3 +350,109 @@ describe("agent:list", () => {
     expect(result.agents).toEqual([]);
   });
 });
+
+// ── provider & agent config handlers ──
+
+function registerProviderHandlers(bus, engine) {
+  bus.handle("provider:credentials", async ({ providerId }) => {
+    const creds = engine.providerRegistry.getCredentials(providerId);
+    if (!creds?.apiKey) return { error: "no_credentials" };
+    return { apiKey: creds.apiKey, baseUrl: creds.baseUrl, api: creds.api };
+  });
+
+  bus.handle("provider:models-by-type", async ({ type, providerId }) => {
+    if (providerId) {
+      return { models: engine.providerRegistry.getModelsByType(providerId, type) };
+    }
+    return { models: engine.providerRegistry.getAllModelsByType(type) };
+  });
+
+  bus.handle("agent:config", async ({ agentId }) => {
+    const agent = engine.agentManager.getAgent(agentId);
+    if (!agent) return { error: "not_found" };
+    return { config: agent.config };
+  });
+}
+
+describe("provider:credentials", () => {
+  it("returns credentials for configured provider", async () => {
+    const bus = new EventBus();
+    const engine = {
+      providerRegistry: {
+        getCredentials: vi.fn(() => ({ apiKey: "sk-test", baseUrl: "https://api.test.com", api: "openai-completions" })),
+      },
+    };
+    registerProviderHandlers(bus, engine);
+
+    const result = await bus.request("provider:credentials", { providerId: "test" });
+    expect(result.apiKey).toBe("sk-test");
+    expect(result.baseUrl).toBe("https://api.test.com");
+  });
+
+  it("returns error for unconfigured provider", async () => {
+    const bus = new EventBus();
+    const engine = {
+      providerRegistry: { getCredentials: vi.fn(() => ({})) },
+    };
+    registerProviderHandlers(bus, engine);
+
+    const result = await bus.request("provider:credentials", { providerId: "none" });
+    expect(result.error).toBe("no_credentials");
+  });
+});
+
+describe("provider:models-by-type", () => {
+  it("returns image models for a specific provider", async () => {
+    const bus = new EventBus();
+    const engine = {
+      providerRegistry: {
+        getModelsByType: vi.fn(() => [{ id: "img-1", type: "image" }]),
+        getAllModelsByType: vi.fn(() => []),
+      },
+    };
+    registerProviderHandlers(bus, engine);
+
+    const result = await bus.request("provider:models-by-type", { type: "image", providerId: "test" });
+    expect(result.models).toHaveLength(1);
+    expect(engine.providerRegistry.getModelsByType).toHaveBeenCalledWith("test", "image");
+  });
+
+  it("returns all image models when no providerId", async () => {
+    const bus = new EventBus();
+    const engine = {
+      providerRegistry: {
+        getModelsByType: vi.fn(),
+        getAllModelsByType: vi.fn(() => [{ id: "img-1", provider: "a" }, { id: "img-2", provider: "b" }]),
+      },
+    };
+    registerProviderHandlers(bus, engine);
+
+    const result = await bus.request("provider:models-by-type", { type: "image" });
+    expect(result.models).toHaveLength(2);
+    expect(engine.providerRegistry.getAllModelsByType).toHaveBeenCalledWith("image");
+  });
+});
+
+describe("agent:config", () => {
+  it("returns agent config", async () => {
+    const bus = new EventBus();
+    const engine = {
+      agentManager: {
+        getAgent: vi.fn(() => ({ config: { imageModel: { id: "img-1", provider: "test" } } })),
+      },
+    };
+    registerProviderHandlers(bus, engine);
+
+    const result = await bus.request("agent:config", { agentId: "agent-1" });
+    expect(result.config.imageModel).toEqual({ id: "img-1", provider: "test" });
+  });
+
+  it("returns error for missing agent", async () => {
+    const bus = new EventBus();
+    const engine = { agentManager: { getAgent: vi.fn(() => null) } };
+    registerProviderHandlers(bus, engine);
+
+    const result = await bus.request("agent:config", { agentId: "missing" });
+    expect(result.error).toBe("not_found");
+  });
+});

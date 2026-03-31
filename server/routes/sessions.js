@@ -73,7 +73,8 @@ export function createSessionsRoute(engine) {
           }
         } else if (m.role === "toolResult") {
           const d = m.details || {};
-          if (m.toolName === "present_files" && d.files?.length) {
+          // COMPAT(v0.78): present_files → stage_files, remove after v0.90
+          if ((m.toolName === "stage_files" || m.toolName === "present_files") && d.files?.length) {
             fileOutputs.push({ afterIndex: allMessages.length - 1, files: d.files });
           } else if (m.toolName === "create_artifact" && d.content) {
             artifacts.push({
@@ -200,7 +201,7 @@ export function createSessionsRoute(engine) {
       await engine.switchSession(sessionPath);
 
       // 恢复目标 session 的浏览器（若有）
-      if (bm.isRunning) await bm.resumeForSession(sessionPath);
+      await bm.resumeForSession(sessionPath);
 
       return c.json({
         ok: true,
@@ -220,7 +221,7 @@ export function createSessionsRoute(engine) {
     } catch (err) {
       const errDetail = `${err.message}\n${err.stack || ""}`;
       console.error("[sessions/switch] error:", errDetail);
-      try { require("fs").appendFileSync(require("path").join(require("os").homedir(), ".hanako", "switch-error.log"), `${new Date().toISOString()}\n${errDetail}\n---\n`); } catch {}
+      try { require("fs").appendFileSync(require("path").join(engine.hanakoHome, "switch-error.log"), `${new Date().toISOString()}\n${errDetail}\n---\n`); } catch {}
       return c.json({ error: err.message }, 500);
     }
   });

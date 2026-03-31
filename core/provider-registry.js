@@ -15,6 +15,7 @@ import path from "path";
 import YAML from "js-yaml";
 import { safeReadYAMLSync } from "../shared/safe-fs.js";
 import { fromRoot } from "../shared/hana-root.js";
+import { lookupKnown } from "../shared/known-models.js";
 
 const _defaultModels = JSON.parse(
   fs.readFileSync(fromRoot("lib", "default-models.json"), "utf-8"),
@@ -30,7 +31,6 @@ import { geminiPlugin } from "../lib/providers/gemini.js";
 import { openrouterPlugin } from "../lib/providers/openrouter.js";
 import { ollamaPlugin } from "../lib/providers/ollama.js";
 import { minimaxPlugin } from "../lib/providers/minimax.js";
-import { minimaxOAuthPlugin } from "../lib/providers/minimax-oauth.js";
 import { openaiCodexOAuthPlugin } from "../lib/providers/openai-codex-oauth.js";
 // 中国
 import { siliconflowPlugin } from "../lib/providers/siliconflow.js";
@@ -65,7 +65,6 @@ const BUILTIN_PLUGINS = [
   openrouterPlugin,
   ollamaPlugin,
   minimaxPlugin,
-  minimaxOAuthPlugin,
   openaiCodexOAuthPlugin,
   // 中国
   siliconflowPlugin,
@@ -342,7 +341,7 @@ export class ProviderRegistry {
 
   /**
    * 获取 OAuth provider 在 auth.json 中的实际 key
-   * （部分 provider 的 authJsonKey 与 id 不同，如 minimax-oauth → minimax）
+   * （部分 provider 的 authJsonKey 与 id 不同，如 openai-codex-oauth → openai-codex）
    * @param {string} providerId
    * @returns {string}
    */
@@ -408,7 +407,9 @@ export class ProviderRegistry {
 
   /**
    * 读取 provider 的凭证信息（apiKey, baseUrl, api）
-   * 从 added-models.yaml 读取用户配置值，baseUrl/api 不存在时回退到插件默认值
+   * 从 added-models.yaml 读取用户配置值，baseUrl/api 不存在时回退到插件默认值。
+   * OAuth provider 若 YAML 无 api_key，自动从 auth.json 补全 access token；
+   * 若 auth.json 含 resourceUrl 且 YAML 未配 base_url，用 resourceUrl 作为 baseUrl。
    * @param {string} providerId
    * @returns {{ apiKey: string, baseUrl: string, api: string } | null}
    */
@@ -418,11 +419,47 @@ export class ProviderRegistry {
     if (!uc) return null;
 
     const plugin = this._plugins.get(providerId);
+    let apiKey = uc.api_key || "";
+    let oauthBaseUrl = "";
+
+    // OAuth provider: YAML 没有 api_key，从 auth.json 取 access token + resourceUrl
+    if (!apiKey) {
+      const authType = uc.auth_type || plugin?.authType;
+      if (authType === "oauth") {
+        const authJsonKey = plugin?.authJsonKey || providerId;
+        const oauth = this._readOAuthEntry(authJsonKey);
+        apiKey = oauth.token;
+        oauthBaseUrl = oauth.resourceUrl;
+      }
+    }
+
     return {
-      apiKey: uc.api_key || "",
-      baseUrl: uc.base_url || plugin?.defaultBaseUrl || "",
+      apiKey,
+      baseUrl: uc.base_url || oauthBaseUrl || plugin?.defaultBaseUrl || "",
       api: uc.api || plugin?.defaultApi || "",
     };
+  }
+
+  /**
+   * 从 auth.json 读取 OAuth 条目（token + resourceUrl）
+   * @private
+   * @param {string} authJsonKey - auth.json 中的 key
+   * @returns {{ token: string, resourceUrl: string }}
+   */
+  _readOAuthEntry(authJsonKey) {
+    try {
+      const authPath = path.join(this._hanakoHome, "auth.json");
+      const entry = JSON.parse(fs.readFileSync(authPath, "utf-8"))?.[authJsonKey];
+      if (!entry) return { token: "", resourceUrl: "" };
+      if (typeof entry === "string") return { token: entry, resourceUrl: "" };
+      let token = "";
+      if (typeof entry.access === "string") token = entry.access;
+      else if (typeof entry.apiKey === "string") token = entry.apiKey;
+      else if (typeof entry.token === "string") token = entry.token;
+      return { token, resourceUrl: entry.resourceUrl || "" };
+    } catch {
+      return { token: "", resourceUrl: "" };
+    }
   }
 
   /**
@@ -496,13 +533,14 @@ export class ProviderRegistry {
    */
   updateModelEntry(providerId, modelId, meta) {
     const userConfig = this._loadAddedModels();
-    const uc = userConfig[providerId];
-    if (!uc?.models || !Array.isArray(uc.models)) {
-      throw new Error(`Provider "${providerId}" not found or has no models`);
+    if (!userConfig[providerId]) userConfig[providerId] = {};
+    if (!Array.isArray(userConfig[providerId].models)) {
+      userConfig[providerId].models = [];
     }
+    const uc = userConfig[providerId];
 
     // 白名单：只允许模型能力字段
-    const ALLOWED = ["name", "context", "maxOutput", "vision", "reasoning"];
+    const ALLOWED = ["name", "context", "maxOutput", "vision", "reasoning", "type"];
     const safe = {};
     for (const key of ALLOWED) {
       if (meta[key] !== undefined) safe[key] = meta[key];
@@ -513,16 +551,15 @@ export class ProviderRegistry {
       const mid = typeof m === "object" ? m.id : m;
       if (mid !== modelId) return m;
       found = true;
-      // 合并：保留已有对象字段，覆盖传入的 meta
       const base = typeof m === "object" ? m : { id: mid };
       const merged = { ...base, ...safe };
-      // 清理空值：name 为空时删除让 model-sync 走词典/humanize
       if (!merged.name) delete merged.name;
       return merged;
     });
 
+    // upsert：模型不在列表中时自动添加
     if (!found) {
-      throw new Error(`Model "${modelId}" not found in provider "${providerId}"`);
+      uc.models.push({ id: modelId, ...safe });
     }
 
     this._saveAddedModels(userConfig);
@@ -547,5 +584,44 @@ export class ProviderRegistry {
    */
   removeProvider(providerId) {
     this.remove(providerId);
+  }
+
+  /**
+   * Get models of a specific type for a provider.
+   * Type resolution: model entry type field → known-models.json type → default "chat"
+   * @param {string} providerId
+   * @param {string} type - "chat" | "image" | ...
+   * @returns {{ id: string, name?: string, type: string }[]}
+   */
+  getModelsByType(providerId, type) {
+    const raw = this._loadAddedModels();
+    const models = raw[providerId]?.models || [];
+    const results = [];
+    for (const m of models) {
+      const isObj = typeof m === "object" && m !== null;
+      const id = isObj ? m.id : m;
+      if (!id) continue;
+      const known = lookupKnown(providerId, id);
+      const resolvedType = (isObj && m.type) || known?.type || "chat";
+      if (resolvedType !== type) continue;
+      results.push({ id, name: (isObj && m.name) || known?.name || id, type: resolvedType });
+    }
+    return results;
+  }
+
+  /**
+   * Get all models of a specific type across all providers.
+   * @param {string} type
+   * @returns {{ provider: string, id: string, name?: string, type: string }[]}
+   */
+  getAllModelsByType(type) {
+    const raw = this._loadAddedModels();
+    const results = [];
+    for (const providerId of Object.keys(raw)) {
+      for (const entry of this.getModelsByType(providerId, type)) {
+        results.push({ ...entry, provider: providerId });
+      }
+    }
+    return results;
   }
 }

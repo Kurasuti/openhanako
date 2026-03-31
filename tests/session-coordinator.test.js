@@ -8,7 +8,7 @@ const { createAgentSessionMock, sessionManagerCreateMock } = vi.hoisted(() => ({
   sessionManagerCreateMock: vi.fn(),
 }));
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("../lib/pi-sdk/index.js", () => ({
   createAgentSession: createAgentSessionMock,
   SessionManager: {
     create: sessionManagerCreateMock,

@@ -19,6 +19,7 @@ const KNOWN_MODELS = {
   },
   openai: {
     "gpt-4o": { name: "GPT-4o", context: 128000, maxOutput: 16384, vision: true },
+    "gpt-image-1": { name: "GPT Image 1", type: "image" },
   },
 };
 
@@ -204,33 +205,6 @@ describe("syncModels", () => {
     expect(model.maxTokens).toBe(4096);
   });
 
-  it("resolves OAuth credentials from auth.json via oauthKeyMap", async () => {
-    const syncModels = await loadSync();
-
-    // write auth.json with an OAuth token under "minimax" key
-    fs.writeFileSync(authJsonPath, JSON.stringify({
-      minimax: { apiKey: "oauth-token-123" },
-    }), "utf-8");
-
-    const providers = {
-      "minimax-oauth": {
-        base_url: "https://api.minimax.chat/v1",
-        api: "openai-completions",
-        // no api_key — should resolve from auth.json
-        models: ["minimax-model-1"],
-      },
-    };
-
-    const oauthKeyMap = { "minimax-oauth": "minimax" };
-
-    const changed = syncModels(providers, { modelsJsonPath, authJsonPath, oauthKeyMap });
-
-    expect(changed).toBe(true);
-    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
-    expect(result.providers["minimax-oauth"]).toBeDefined();
-    expect(result.providers["minimax-oauth"].apiKey).toBe("oauth-token-123");
-  });
-
   it("uses atomic write (tmp + rename)", async () => {
     const syncModels = await loadSync();
 
@@ -323,6 +297,51 @@ describe("syncModels", () => {
     expect(result.providers.dashscope.models[0].id).toBe("qwen3.5-flash");
     expect(result.providers.deepseek.models[0].id).toBe("deepseek-chat");
     expect(result.providers.deepseek.models[0].name).toBe("DeepSeek Chat");
+  });
+
+  it("skips models with type: image from models.json output", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      openai: {
+        base_url: "https://api.openai.com/v1",
+        api_key: "sk-test",
+        api: "openai-completions",
+        models: [
+          "gpt-4o",
+          { id: "gpt-image-1", type: "image" },
+        ],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const models = result.providers.openai?.models || [];
+    const ids = models.map(m => m.id);
+    expect(ids).toContain("gpt-4o");
+    expect(ids).not.toContain("gpt-image-1");
+  });
+
+  it("skips string model entries whose type is image via known-models lookup", async () => {
+    const syncModels = await loadSync();
+
+    const providers = {
+      openai: {
+        base_url: "https://api.openai.com/v1",
+        api_key: "sk-test",
+        api: "openai-completions",
+        models: ["gpt-4o", "gpt-image-1"],
+      },
+    };
+
+    syncModels(providers, { modelsJsonPath });
+
+    const result = JSON.parse(fs.readFileSync(modelsJsonPath, "utf-8"));
+    const models = result.providers.openai?.models || [];
+    const ids = models.map(m => m.id);
+    expect(ids).toContain("gpt-4o");
+    expect(ids).not.toContain("gpt-image-1");
   });
 
   it("falls back to humanized name for unknown models", async () => {

@@ -29,19 +29,17 @@ import { safeJson } from "../hono-helpers.js";
 import { saveConfig, clearConfigCache } from "../../lib/memory/config-loader.js";
 import { rebuildIndex } from "../../lib/tools/experience.js";
 import { splitByScope, injectGlobalFields } from '../../shared/config-scope.js';
+import { validateId, agentExists } from "../utils/validation.js";
+import {
+  buildInlineProviderCredentialUpdate,
+  clearInlineProviderCredentialFields,
+  hasInlineProviderCredentialPatch,
+} from "./provider-credentials.js";
 
 // ── 工具函数 ──
 
-function validateId(id) {
-  return id && !id.includes("..") && !id.includes("/") && !id.includes("\\");
-}
-
 function agentDir(engine, id) {
   return path.join(engine.agentsDir, id);
-}
-
-function agentExists(engine, id) {
-  return fsSync.existsSync(path.join(agentDir(engine, id), "config.yaml"));
 }
 
 function isActiveAgent(engine, id) {
@@ -292,29 +290,26 @@ export function createAgentsRoute(engine) {
       // 内联 API 凭证 → 全局 added-models.yaml 对应条目
       for (const blockName of ["api", "embedding_api", "utility_api"]) {
         const block = agentPartial[blockName];
-        if (block?.api_key || block?.base_url) {
+        if (hasInlineProviderCredentialPatch(block)) {
           const cfgPath = path.join(agentDir(engine, id), "config.yaml");
           const agentCfg = YAML.load(fsSync.readFileSync(cfgPath, "utf-8")) || {};
-          const provName = typeof block.provider === "string" && block.provider.trim()
-            ? block.provider.trim()
-            : (agentCfg[blockName]?.provider || "").trim();
+          const { provider: provName, update: provUpdate } = buildInlineProviderCredentialUpdate(
+            block,
+            agentCfg[blockName]?.provider || "",
+          );
           if (!provName) {
             return c.json({ error: `${blockName}.provider is required when saving credentials` }, 400);
           }
-          const provUpdate = {};
-          if (block.api_key) provUpdate.api_key = block.api_key;
-          if (block.base_url) provUpdate.base_url = block.base_url;
           engine.providerRegistry.saveProvider(provName, provUpdate);
-          block.api_key = "";
-          block.base_url = "";
+          clearInlineProviderCredentialFields(block);
           providersChanged = true;
         }
       }
 
       // providers 变更后确保运行时刷新
       if (providersChanged) {
+        await engine.onProviderChanged();
         clearConfigCache();
-        engine.providerRegistry?.reload();
       }
 
       // providers 是全局状态，变更后无论编辑的是哪个 agent，运行时都要刷新

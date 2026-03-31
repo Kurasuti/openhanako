@@ -397,7 +397,7 @@
       "done": "✂️ {name} 整理好了",
       "failed": "✂️ {name} 整理不动了"
     },
-    "present_files": {
+    "stage_files": {
       "running": "📎 {name} 正在整理文件",
       "done": "📎 在这！",
       "failed": "📎 文件没放好"
@@ -449,6 +449,7 @@
       "agent": "助手",
       "me": "我",
       "providers": "供应商",
+      "media": "多媒体",
       "models": "模型",
       "memory": "记忆",
       "work": "工作",
@@ -502,6 +503,8 @@
       "publicIshikiHint": "出于隐私考虑，助手与访客对话时无法访问记忆、你的个人信息，以及电脑上的任何文件与工具。\n你可以在这里设定助手对访客说话时的回复风格以及注意事项。",
       "chatModel": "Ta 的模型",
       "chatModelHint": "Ta 在对话与工作中使用的模型",
+      "imageModel": "图片模型",
+      "imageModelHint": "Ta 在图片生成时使用的模型",
       "addAgent": "新建助手",
       "createTitle": "新建助手",
       "namePlaceholder": "起个名字",
@@ -605,6 +608,27 @@
       "noKey": "未配置",
       "remove": "移除",
       "deleteConfirm": "确定删除供应商 {name}？相关模型将一并清除。"
+    },
+    "media": {
+      "imageGeneration": "图片生成",
+      "defaultModel": "默认图片模型",
+      "credentialOk": "API Key 已配置（复用供应商设置）",
+      "credentialMissing": "未配置，前往供应商设置",
+      "addModel": "添加图片模型",
+      "providerDefaults": "默认参数",
+      "size": "尺寸",
+      "format": "格式",
+      "quality": "质量",
+      "watermark": "水印",
+      "aspectRatio": "长宽比",
+      "speechRecognition": "语音识别",
+      "speechSynthesis": "语音合成",
+      "comingSoon": "即将推出",
+      "noProvider": "请选择一个供应商查看详情",
+      "models": "图片模型",
+      "globalDefault": "全局默认",
+      "followGlobal": "跟随全局默认",
+      "default": "默认"
     },
     "oauth": {
       "title": "快速登录",
@@ -1481,9 +1505,9 @@
       "recordContentDesc": "具体的经验内容，简洁直接，一句话"
     },
     "outputFile": {
-      "label": "呈现文件",
-      "description": "当你为用户成功创建了文件（PDF、Word、Excel、PPT、Markdown 等）后，调用此工具将文件呈现在对话中，让用户可以直接点击打开。只在文件确实已经写入磁盘后调用，不要在文件创建失败时调用。第一个路径应该是用户最想看到的文件。不要仅在文本里提及文件路径，必须调用此工具。",
-      "filepathsDesc": "要呈现给用户的文件绝对路径数组",
+      "label": "交付文件",
+      "description": "当你为任何人（用户、agents）成功创建了文件，或被要求提供某个文件时，调用此工具将文件呈现在对话中，让用户可以直接点击打开。只在文件存在时调用，不要在文件找不到或者创建失败时调用。不要仅在文本里提及文件路径，必须调用此工具。",
+      "filepathsDesc": "文件绝对路径数组",
       "filePathDesc": "(兼容) 单个文件的绝对路径",
       "labelDesc": "(兼容) 显示给用户的文件名"
     },

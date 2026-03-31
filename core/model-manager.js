@@ -9,12 +9,7 @@
  * 都在这个数组上完成，不再经过中间层。
  */
 import path from "path";
-import {
-  AuthStorage,
-  ModelRegistry,
-} from "@mariozechner/pi-coding-agent";
-import { registerOAuthProvider } from "@mariozechner/pi-ai/oauth";
-import { minimaxOAuthProvider } from "../lib/oauth/minimax-portal.js";
+import { AuthStorage, createModelRegistry } from "../lib/pi-sdk/index.js";
 import { t } from "../server/i18n.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { ExecutionRouter } from "./execution-router.js";
@@ -42,8 +37,7 @@ export class ModelManager {
   /** 初始化 AuthStorage + ModelRegistry + 新架构模块 */
   init() {
     this._authStorage = AuthStorage.create(path.join(this._hanakoHome, "auth.json"));
-    registerOAuthProvider(minimaxOAuthProvider);
-    this._modelRegistry = new ModelRegistry(
+    this._modelRegistry = createModelRegistry(
       this._authStorage,
       path.join(this._hanakoHome, "models.json"),
     );
@@ -156,8 +150,6 @@ export class ModelManager {
     });
     if (changed) {
       this._modelRegistry.refresh();
-      // refresh() 内部调 resetOAuthProviders()，需要重新注册
-      registerOAuthProvider(minimaxOAuthProvider);
       await this.refreshAvailable();
     }
     return changed;
@@ -231,6 +223,15 @@ export class ModelManager {
   }
 
   /**
+   * Provider 配置变更后 reload registry + 重新同步模型。
+   * 由 engine.onProviderChanged() 调用，不要直接用。
+   */
+  async reloadAndSync() {
+    this.providerRegistry.reload();
+    await this.syncAndRefresh();
+  }
+
+  /**
    * 统一解析：模型引用 -> { model, provider, api, api_key, base_url }
    * 返回 snake_case 格式（兼容 callProviderText / diary-writer / compile 等消费方）
    * @param {string|object} modelRef
@@ -267,5 +268,17 @@ export class ModelManager {
       throw new Error(t("error.noUtilityModel"));
     }
     return this.executionRouter.resolveUtilityConfig(agentConfig, sharedModels, utilApi);
+  }
+
+  /**
+   * 从 Pi SDK registry 获取某 provider 的所有模型（不经过 added-models.yaml 过滤）
+   * 用于模型发现（fetch-models），不影响主应用的 availableModels
+   * @param {string} name - provider ID
+   * @returns {object[]}
+   */
+  getRegistryModelsForProvider(name) {
+    const authKey = this.providerRegistry.getAuthJsonKey(name);
+    const all = this._modelRegistry.getAll();
+    return all.filter(m => m.provider === name || m.provider === authKey);
   }
 }

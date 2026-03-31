@@ -70,7 +70,7 @@ export function createAuthRoute(engine) {
     let authInstructions = null;
     let usesCallbackServer = false;
 
-    // ProviderRegistry 的 plugin ID 可能和 Pi SDK 的 provider ID 不同（如 "minimax-oauth" → "minimax"）
+    // ProviderRegistry 的 plugin ID 可能和 Pi SDK 的 provider ID 不同（如 "openai-codex-oauth" → "openai-codex"）
     const authKey = engine.providerRegistry?.getAuthJsonKey(provider) || provider;
 
     // 检查 provider 是否使用本地回调服务器（如 OpenAI Codex）
@@ -147,7 +147,7 @@ export function createAuthRoute(engine) {
       pendingFlows.delete(sessionId);
 
       try {
-        await engine.syncModelsAndRefresh();
+        await engine.onProviderChanged();
       } catch (err) {
         console.error("[auth] post-login model sync failed:", err.message);
       }
@@ -178,7 +178,7 @@ export function createAuthRoute(engine) {
 
     if (flow.result.ok) {
       try {
-        await engine.syncModelsAndRefresh();
+        await engine.onProviderChanged();
       } catch (err) {
         console.error("[auth] post-login model sync failed:", err.message);
       }

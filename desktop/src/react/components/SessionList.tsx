@@ -5,7 +5,7 @@
  * 通过 portal 渲染到 #sessionList，从 Zustand sessions 状态驱动。
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../stores';
 import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
 import { useI18n } from '../hooks/use-i18n';
@@ -109,7 +109,7 @@ function SessionListInner() {
 
 // ── Session Item ──
 
-function SessionItem({ session: s, isActive, isStreaming, agents, browserUrl }: {
+const SessionItem = memo(function SessionItem({ session: s, isActive, isStreaming, agents, browserUrl }: {
   session: Session;
   isActive: boolean;
   isStreaming: boolean;
@@ -231,11 +231,11 @@ function SessionItem({ session: s, isActive, isStreaming, agents, browserUrl }: 
       )}
     </button>
   );
-}
+});
 
 // ── Agent Avatar Badge ──
 
-function AgentBadge({ agentId, agentName, agents }: {
+const AgentBadge = memo(function AgentBadge({ agentId, agentName, agents }: {
   agentId: string;
   agentName: string | null;
   agents: Agent[];
@@ -257,4 +257,4 @@ function AgentBadge({ agentId, agentName, agents }: {
       onError={() => setErrored(true)}
     />
   );
-}
+});

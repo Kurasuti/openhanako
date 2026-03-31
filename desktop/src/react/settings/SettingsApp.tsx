@@ -15,6 +15,7 @@ import { WorkTab } from './tabs/WorkTab';
 import { SkillsTab } from './tabs/SkillsTab';
 import { BridgeTab } from './tabs/BridgeTab';
 import { ProvidersTab } from './tabs/ProvidersTab';
+import { MediaTab } from './tabs/MediaTab';
 import { AboutTab } from './tabs/AboutTab';
 import { PluginsTab } from './tabs/PluginsTab';
 import { CropOverlay } from './overlays/CropOverlay';
@@ -38,6 +39,7 @@ const TAB_COMPONENTS: Record<string, React.ComponentType> = {
   skills: SkillsTab,
   bridge: BridgeTab,
   providers: ProvidersTab,
+  media: MediaTab,
   plugins: PluginsTab,
   about: AboutTab,
 };

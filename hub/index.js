@@ -310,6 +310,27 @@ export class Hub {
       }));
       return { agents };
     }));
+
+    // ── provider & agent handlers ──
+
+    this._sessionHandlerCleanups.push(bus.handle("provider:credentials", async ({ providerId }) => {
+      const creds = engine.providerRegistry.getCredentials(providerId);
+      if (!creds?.apiKey) return { error: "no_credentials" };
+      return { apiKey: creds.apiKey, baseUrl: creds.baseUrl, api: creds.api };
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("provider:models-by-type", async ({ type, providerId }) => {
+      if (providerId) {
+        return { models: engine.providerRegistry.getModelsByType(providerId, type) };
+      }
+      return { models: engine.providerRegistry.getAllModelsByType(type) };
+    }));
+
+    this._sessionHandlerCleanups.push(bus.handle("agent:config", async ({ agentId }) => {
+      const agent = engine.agentManager.getAgent(agentId);
+      if (!agent) return { error: "not_found" };
+      return { config: agent.config };
+    }));
   }
 
   _setupDmHandler() {

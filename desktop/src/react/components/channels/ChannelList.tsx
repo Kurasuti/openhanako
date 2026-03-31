@@ -2,7 +2,7 @@
  * ChannelList — 频道列表渲染（DM + Group 分区）
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../stores';
 import { useI18n } from '../../hooks/use-i18n';
 import { hanaFetch, hanaUrl } from '../../hooks/use-hana-fetch';
@@ -38,12 +38,23 @@ export interface MemberInfo {
 
 // ── 辅助函数 ──
 
+/** 构建 agent 查找 Map（按 id 和 name 双索引），配合 useMemo 使用 */
+export function buildAgentMap(agents: Agent[]): Map<string, Agent> {
+  const m = new Map<string, Agent>();
+  for (const a of agents) {
+    m.set(a.id, a);
+    if (a.name) m.set(a.name, a);
+  }
+  return m;
+}
+
 export function resolveChannelMember(
   memberId: string,
   userName: string,
   userAvatarUrl: string | null,
   agents: Agent[],
   currentAgentId: string | null,
+  agentMap?: Map<string, Agent>,
 ): MemberInfo {
   if (memberId === 'user' || memberId === userName) {
     return {
@@ -54,7 +65,7 @@ export function resolveChannelMember(
       isUser: true,
     };
   }
-  const agent = agents.find((a) => a.id === memberId || a.name === memberId);
+  const agent = agentMap ? agentMap.get(memberId) : agents.find((a) => a.id === memberId || a.name === memberId);
   if (agent) {
     return {
       id: memberId,
@@ -208,6 +219,8 @@ export function ChannelList() {
   const userAvatarUrl = useStore((s) => s.userAvatarUrl);
   const currentAgentId = useStore((s) => s.currentAgentId);
 
+  const agentMap = useMemo(() => buildAgentMap(agents), [agents]);
+
   if (channels.length === 0) {
     return <div className="session-empty">{t('channel.empty')}</div>;
   }
@@ -230,6 +243,7 @@ export function ChannelList() {
               isDM
               isActive={ch.id === currentChannel}
               agents={agents}
+              agentMap={agentMap}
               userName={userName}
               userAvatarUrl={userAvatarUrl}
               currentAgentId={currentAgentId}
@@ -248,6 +262,7 @@ export function ChannelList() {
               isDM={false}
               isActive={ch.id === currentChannel}
               agents={agents}
+              agentMap={agentMap}
               userName={userName}
               userAvatarUrl={userAvatarUrl}
               currentAgentId={currentAgentId}
@@ -267,6 +282,7 @@ interface ChannelItemProps {
   isDM: boolean;
   isActive: boolean;
   agents: Agent[];
+  agentMap: Map<string, Agent>;
   userName: string;
   userAvatarUrl: string | null;
   currentAgentId: string | null;
@@ -281,7 +297,7 @@ function confirmDeleteChannel(channelId: string) {
   deleteChannel(channelId);
 }
 
-function ChannelItem({ channel, isDM, isActive, agents, userName, userAvatarUrl, currentAgentId, onOpen }: ChannelItemProps) {
+function ChannelItem({ channel, isDM, isActive, agents, agentMap, userName, userAvatarUrl, currentAgentId, onOpen }: ChannelItemProps) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
   const handleClick = useCallback(() => {
@@ -299,7 +315,7 @@ function ChannelItem({ channel, isDM, isActive, agents, userName, userAvatarUrl,
     setCtxMenu(null);
   }, []);
 
-  const selfInfo = resolveChannelMember(currentAgentId || '', userName, userAvatarUrl, agents, currentAgentId);
+  const selfInfo = resolveChannelMember(currentAgentId || '', userName, userAvatarUrl, agents, currentAgentId, agentMap);
 
   const ctxMenuItems: ContextMenuItem[] = ctxMenu ? [
     {
@@ -317,7 +333,7 @@ function ChannelItem({ channel, isDM, isActive, agents, userName, userAvatarUrl,
       onContextMenu={handleContextMenu}
     >
       {isDM ? (
-        <DmIcon channel={channel} selfInfo={selfInfo} agents={agents} userName={userName} userAvatarUrl={userAvatarUrl} currentAgentId={currentAgentId} />
+        <DmIcon channel={channel} selfInfo={selfInfo} agents={agents} agentMap={agentMap} userName={userName} userAvatarUrl={userAvatarUrl} currentAgentId={currentAgentId} />
       ) : (
         <div className={styles.channelItemIcon}>#</div>
       )}
@@ -330,7 +346,7 @@ function ChannelItem({ channel, isDM, isActive, agents, userName, userAvatarUrl,
         </div>
         <div className={styles.channelItemPreview}>
           {channel.lastMessage && (() => {
-            const senderInfo = resolveChannelMember(channel.lastSender, userName, userAvatarUrl, agents, currentAgentId);
+            const senderInfo = resolveChannelMember(channel.lastSender, userName, userAvatarUrl, agents, currentAgentId, agentMap);
             return `${senderInfo.displayName}: ${channel.lastMessage}`;
           })()}
         </div>
@@ -354,16 +370,17 @@ function ChannelItem({ channel, isDM, isActive, agents, userName, userAvatarUrl,
 
 // ── DM Icon (dual avatar) ──
 
-function DmIcon({ channel, selfInfo, agents, userName, userAvatarUrl, currentAgentId }: {
+function DmIcon({ channel, selfInfo, agents, agentMap, userName, userAvatarUrl, currentAgentId }: {
   channel: Channel;
   selfInfo: MemberInfo;
   agents: Agent[];
+  agentMap: Map<string, Agent>;
   userName: string;
   userAvatarUrl: string | null;
   currentAgentId: string | null;
 }) {
   const peerId = channel.peerId || channel.members?.[0] || '';
-  const peerInfo = resolveChannelMember(peerId, userName, userAvatarUrl, agents, currentAgentId);
+  const peerInfo = resolveChannelMember(peerId, userName, userAvatarUrl, agents, currentAgentId, agentMap);
 
   return (
     <div className={styles.channelDmIcon}>

@@ -1,12 +1,12 @@
 /** ChannelsPanel — 频道系统入口 + 保留组件（子组件在 ./channels/） */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../stores';
-import { hanaFetch } from '../hooks/use-hana-fetch';
+import { fetchConfig } from '../hooks/use-config';
 import { useI18n } from '../hooks/use-i18n';
 import { renderMarkdown } from '../utils/markdown';
 import { loadChannels, sendChannelMessage } from '../stores/channel-actions';
-import { resolveChannelMember, formatChannelTime, MemberAvatar } from './channels/ChannelList';
+import { resolveChannelMember, buildAgentMap, formatChannelTime, MemberAvatar } from './channels/ChannelList';
 import type { MemberInfo } from './channels/ChannelList';
 import styles from './channels/Channels.module.css';
 
@@ -21,7 +21,7 @@ export function ChannelsPanel() {
   // 启动时从后端读频道开关状态；开启时加载频道列表
   useEffect(() => {
     if (!serverPort) return;
-    hanaFetch('/api/config').then(r => r.json()).then(cfg => {
+    fetchConfig().then(cfg => {
       const enabled = cfg?.channels?.enabled !== false;
       useStore.getState().setChannelsEnabled(enabled);
       if (enabled) loadChannels();
@@ -47,6 +47,7 @@ export function ChannelMessages() {
   const userName = useStore(s => s.userName);
   const userAvatarUrl = useStore(s => s.userAvatarUrl);
   const currentAgentId = useStore(s => s.currentAgentId);
+  const agentMap = useMemo(() => buildAgentMap(agents), [agents]);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll: find the parent .channel-messages container
@@ -67,7 +68,7 @@ export function ChannelMessages() {
     <div ref={wrapperRef}>
       {messages.map((msg, idx) => {
         const isContinuation = msg.sender === lastSender;
-        const senderInfo = resolveChannelMember(msg.sender, userName, userAvatarUrl, agents, currentAgentId);
+        const senderInfo = resolveChannelMember(msg.sender, userName, userAvatarUrl, agents, currentAgentId, agentMap);
         const isSelf = senderInfo.isUser || (isDM && msg.sender === (currentAgentId || ''));
         const el = (
           <div
@@ -124,9 +125,11 @@ export function ChannelMembers() {
   const userAvatarUrl = useStore(s => s.userAvatarUrl);
   const currentAgentId = useStore(s => s.currentAgentId);
 
+  const agentMap = useMemo(() => buildAgentMap(agents), [agents]);
+
   if (!currentChannel) return null;
 
-  const resolve = (id: string) => resolveChannelMember(id, userName, userAvatarUrl, agents, currentAgentId);
+  const resolve = (id: string) => resolveChannelMember(id, userName, userAvatarUrl, agents, currentAgentId, agentMap);
 
   if (isDM) {
     const peerInfo = resolve(channelMembers[0] || '');
@@ -154,6 +157,7 @@ export function ChannelInput() {
   const userAvatarUrl = useStore(s => s.userAvatarUrl);
   const currentAgentId = useStore(s => s.currentAgentId);
 
+  const agentMap = useMemo(() => buildAgentMap(agents), [agents]);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
   const [mentionActive, setMentionActive] = useState(false);
@@ -179,7 +183,7 @@ export function ChannelInput() {
     const keyword = before.slice(atIdx + 1).toLowerCase();
     setMentionStartPos(atIdx);
     const members = (channelMembers || [])
-      .map(id => resolveChannelMember(id, userName, userAvatarUrl, agents, currentAgentId))
+      .map(id => resolveChannelMember(id, userName, userAvatarUrl, agents, currentAgentId, agentMap))
       .filter(m => !m.isUser);
     const filtered = keyword
       ? members.filter(m => m.displayName.toLowerCase().includes(keyword) || (m.yuan || '').toLowerCase().includes(keyword))
@@ -188,7 +192,7 @@ export function ChannelInput() {
     setMentionItems(filtered);
     setMentionSelectedIdx(0);
     setMentionActive(true);
-  }, [channelMembers, agents, userName, userAvatarUrl, currentAgentId]);
+  }, [channelMembers, agents, agentMap, userName, userAvatarUrl, currentAgentId]);
 
   const insertMention = useCallback((name: string) => {
     if (!inputRef.current || mentionStartPos < 0) return;

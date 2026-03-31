@@ -903,6 +903,22 @@
       "name": "Gpt Realtime Mini 2025.12.15",
       "context": 128000,
       "maxOutput": 4096
+    },
+    "gpt-image-1": {
+      "name": "GPT Image 1",
+      "type": "image"
+    },
+    "gpt-image-1.5": {
+      "name": "GPT Image 1.5",
+      "type": "image"
+    },
+    "gpt-image-1-mini": {
+      "name": "GPT Image 1 Mini",
+      "type": "image"
+    },
+    "dall-e-3": {
+      "name": "DALL-E 3",
+      "type": "image"
     }
   },
   "anthropic": {
@@ -1482,6 +1498,22 @@
       "maxOutput": 128000,
       "vision": true,
       "reasoning": true
+    },
+    "doubao-seedream-3-0-t2i": {
+      "name": "Seedream 3.0",
+      "type": "image"
+    },
+    "doubao-seedream-4-0-250828": {
+      "name": "Seedream 4.0",
+      "type": "image"
+    },
+    "doubao-seedream-4-5-251128": {
+      "name": "Seedream 4.5",
+      "type": "image"
+    },
+    "doubao-seedream-5-0-lite-260128": {
+      "name": "Seedream 5.0 Lite",
+      "type": "image"
     }
   },
   "minimax": {
@@ -4660,56 +4692,6 @@
       "context": 32768,
       "maxOutput": 4096,
       "vision": true
-    }
-  },
-  "minimax-oauth": {
-    "MiniMax-M2": {
-      "name": "MiniMax M2",
-      "context": 196608,
-      "maxOutput": 128000,
-      "reasoning": true
-    },
-    "MiniMax-M2.1": {
-      "name": "MiniMax M2.1",
-      "context": 204800,
-      "maxOutput": 131072,
-      "reasoning": true
-    },
-    "MiniMax-M2.5": {
-      "name": "MiniMax M2.5",
-      "context": 204800,
-      "maxOutput": 131072,
-      "reasoning": true
-    },
-    "MiniMax-M2.5-highspeed": {
-      "name": "MiniMax M2.5 Highspeed",
-      "context": 204800,
-      "maxOutput": 131072,
-      "reasoning": true
-    },
-    "MiniMax-M2.7": {
-      "name": "MiniMax M2.7",
-      "context": 204800,
-      "maxOutput": 131072,
-      "reasoning": true
-    },
-    "MiniMax-M2.7-highspeed": {
-      "name": "MiniMax M2.7 Highspeed",
-      "context": 204800,
-      "maxOutput": 131072,
-      "reasoning": true
-    },
-    "MiniMax-M2.1-lightning": {
-      "name": "MiniMax M2.1 Lightning",
-      "context": 1000000,
-      "maxOutput": 8192,
-      "reasoning": true
-    },
-    "MiniMax-M2.5-lightning": {
-      "name": "MiniMax M2.5 Lightning",
-      "context": 1000000,
-      "maxOutput": 8192,
-      "reasoning": true
     }
   },
   "openai-codex-oauth": {

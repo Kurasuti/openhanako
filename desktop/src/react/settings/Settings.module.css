@@ -4986,3 +4986,11 @@ a.about-link:hover {
     padding: var(--space-md);
     font-size: 0.82rem;
 }
+
+/* ── Media settings ── */
+.media-settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-top: var(--space-sm);
+}

@@ -125,7 +125,13 @@ export function syncModels(providers, opts = {}) {
       baseUrl: p.base_url,
       api: p.api || "openai-completions",
       apiKey: effectiveApiKey,
-      models: p.models.map(m => buildModelEntry(m, name)),
+      models: p.models.filter(m => {
+        const isObj = typeof m === "object" && m !== null;
+        const id = isObj ? m.id : m;
+        const known = lookupKnown(name, id);
+        const type = (isObj && m.type) || known?.type || "chat";
+        return type === "chat";
+      }).map(m => buildModelEntry(m, name)),
     };
   }
 

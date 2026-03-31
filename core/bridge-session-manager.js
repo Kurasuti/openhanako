@@ -6,11 +6,7 @@
  */
 import fs from "fs";
 import path from "path";
-import {
-  createAgentSession,
-  SessionManager,
-  SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager } from "../lib/pi-sdk/index.js";
 import { debugLog } from "../lib/debug-log.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
 import { t, getLocale } from "../server/i18n.js";
@@ -141,14 +137,14 @@ export class BridgeSessionManager {
       }
 
       let sessionOpts;
-      // MEDIA 协议指令（追加到 bridge 场景的系统提示）
-      const mediaInstruction = "当你需要发送媒体文件（图片、视频、音频、文件）时，在回复中单独一行写 MEDIA:<url>，例如：\nMEDIA:https://example.com/photo.jpg\n不要把 MEDIA: 写在代码块里。一行一个。";
+      // 工具 details.media 收集器（被动提取 tool_execution_end 事件）
+      let toolMediaUrls = [];
 
       if (opts.guest) {
         // guest 模式：yuan + public-ishiki + contextTag，主模型，无工具
         const yuanBase = agent.yuanPrompt;
         const pubIshiki = agent.publicIshiki;
-        const parts = [yuanBase, pubIshiki, opts.contextTag, mediaInstruction].filter(Boolean);
+        const parts = [yuanBase, pubIshiki, opts.contextTag].filter(Boolean);
         const guestPrompt = parts.join("\n\n");
         const tempResourceLoader = Object.create(this._deps.getResourceLoader());
         tempResourceLoader.getSystemPrompt = () => guestPrompt;
@@ -170,6 +166,8 @@ export class BridgeSessionManager {
           model: chatModel,
           thinkingLevel: "none",
           resourceLoader: tempResourceLoader,
+          tools: [],
+          customTools: [],
           settingsManager: this._createSettings(chatModel),
         };
       } else {
@@ -182,7 +180,7 @@ export class BridgeSessionManager {
         const bridgeTools = bridgeReadOnly
           ? baseTools.filter(t => READ_ONLY_BUILTIN_TOOLS.includes(t.name))
           : baseTools;
-        const safeCustomNames = ["search_memory", "web_search", "web_fetch", "present_files"];
+        const safeCustomNames = ["search_memory", "web_search", "web_fetch", "stage_files"];
         const bridgeCustomTools = bridgeReadOnly
           ? (baseCustomTools || []).filter(t => safeCustomNames.includes(t.name))
           : baseCustomTools;
@@ -199,19 +197,10 @@ export class BridgeSessionManager {
           throw new Error(t("error.bridgeAgentModelNotAvailable", { name: agent.agentName, model: ownerModelId }));
         }
 
-        // 包装 resourceLoader 追加 MEDIA 协议指令
-        const baseRL = this._deps.getResourceLoader();
-        const ownerRL = Object.create(baseRL);
-        const baseGetSP = baseRL.getSystemPrompt.bind(baseRL);
-        ownerRL.getSystemPrompt = (...args) => {
-          const sp = baseGetSP(...args);
-          return sp + "\n\n" + mediaInstruction;
-        };
-
         sessionOpts = {
           model: ownerModel,
           thinkingLevel: mm.resolveThinkingLevel(prefs?.thinking_level || "auto"),
-          resourceLoader: ownerRL,
+          resourceLoader: this._deps.getResourceLoader(),
           tools: bridgeTools,
           customTools: bridgeCustomTools,
           settingsManager: this._createSettings(ownerModel),
@@ -237,6 +226,11 @@ export class BridgeSessionManager {
             const delta = sub.delta || "";
             capturedText += delta;
             try { opts.onDelta?.(delta, capturedText); } catch {}
+          }
+        } else if (event.type === "tool_execution_end" && !event.isError) {
+          const media = event.result?.details?.media;
+          if (media?.mediaUrls?.length) {
+            toolMediaUrls.push(...media.mediaUrls);
           }
         }
       });
@@ -269,7 +263,12 @@ export class BridgeSessionManager {
         this.writeIndex(index, agent);
       }
 
-      return capturedText.trim() || null;
+      const text = capturedText.trim() || null;
+      if (toolMediaUrls.length) {
+        debugLog()?.log("bridge-session", `tool media → ${toolMediaUrls.length} url(s) via details.media`);
+        return { text, toolMedia: toolMediaUrls };
+      }
+      return text;
     } catch (err) {
       console.error(`[bridge-session] external message failed (${sessionKey}):`, err.message);
       return { __bridgeError: true, message: err.message };

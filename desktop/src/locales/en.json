@@ -397,7 +397,7 @@
       "done": "✂️ {name} all tidied up",
       "failed": "✂️ {name} couldn't tidy up"
     },
-    "present_files": {
+    "stage_files": {
       "running": "📎 {name} is preparing the file",
       "done": "📎 Here it is!",
       "failed": "📎 Couldn't hand it over"
@@ -449,6 +449,7 @@
       "agent": "Agent",
       "me": "Me",
       "providers": "Providers",
+      "media": "Media",
       "models": "Models",
       "memory": "Memory",
       "work": "Work",
@@ -502,6 +503,8 @@
       "publicIshikiHint": "For privacy, the assistant cannot access memories, your personal info, or any files and tools on your computer when talking to visitors.\nYou can set the assistant's reply style and guidelines for visitor conversations here.",
       "chatModel": "Model",
       "chatModelHint": "The model used for conversations and tasks",
+      "imageModel": "Image Model",
+      "imageModelHint": "The model used for image generation",
       "addAgent": "New Agent",
       "createTitle": "New Agent",
       "namePlaceholder": "Give them a name",
@@ -605,6 +608,27 @@
       "noKey": "Not configured",
       "remove": "Remove",
       "deleteConfirm": "Delete provider {name}? Associated models will be removed."
+    },
+    "media": {
+      "imageGeneration": "Image Generation",
+      "defaultModel": "Default Image Model",
+      "credentialOk": "API Key configured (reuses provider settings)",
+      "credentialMissing": "Not configured, go to Provider settings",
+      "addModel": "Add Image Model",
+      "providerDefaults": "Default Parameters",
+      "size": "Size",
+      "format": "Format",
+      "quality": "Quality",
+      "watermark": "Watermark",
+      "aspectRatio": "Aspect Ratio",
+      "speechRecognition": "Speech Recognition",
+      "speechSynthesis": "Speech Synthesis",
+      "comingSoon": "Coming Soon",
+      "noProvider": "Select a provider to view details",
+      "models": "Image Models",
+      "globalDefault": "Global Default",
+      "followGlobal": "Follow global default",
+      "default": "Default"
     },
     "oauth": {
       "title": "Quick Login",
@@ -1481,9 +1505,9 @@
       "recordContentDesc": "The specific experience content, concise and direct, one sentence"
     },
     "outputFile": {
-      "label": "Present Files",
-      "description": "After successfully creating files for the user (PDF, Word, Excel, PPT, Markdown, etc.), call this tool to present them in the conversation so the user can click to open. Only call after files have actually been written to disk; do not call if file creation failed. The first path should be the file the user most wants to see. Don't just mention file paths in text — call this tool.",
-      "filepathsDesc": "Array of absolute file paths to present to the user",
+      "label": "Stage Files",
+      "description": "After successfully creating files for anyone (users, agents), or when asked to provide a file, call this tool to present them in the conversation so the user can click to open. Only call when the file exists; do not call if the file is missing or creation failed. Don't just mention file paths in text — call this tool.",
+      "filepathsDesc": "Array of absolute file paths to stage",
       "filePathDesc": "(Compat) Single file absolute path",
       "labelDesc": "(Compat) File name shown to the user"
     },

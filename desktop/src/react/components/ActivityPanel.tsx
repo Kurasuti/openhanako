@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../stores';
+import { usePanel } from '../hooks/use-panel';
 import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
+import { fetchConfig, invalidateConfigCache } from '../hooks/use-config';
 import { formatSessionDate, injectCopyButtons, parseMoodFromContent } from '../utils/format';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import { getMd } from '../utils/markdown';
@@ -35,8 +37,11 @@ interface DetailState {
   messages: DetailMessage[];
 }
 
+const FLEX_COLUMN_STYLE: React.CSSProperties = { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 };
+const CURSOR_POINTER_STYLE: React.CSSProperties = { cursor: 'pointer' };
+const DANGER_COLOR_STYLE: React.CSSProperties = { color: 'var(--danger)' };
+
 export function ActivityPanel() {
-  const activePanel = useStore(s => s.activePanel);
   const activities = useStore(s => s.activities) as ActivityItem[];
   const agents = useStore(s => s.agents);
   const currentAgentId = useStore(s => s.currentAgentId);
@@ -47,20 +52,19 @@ export function ActivityPanel() {
   const [hbEnabled, setHbEnabled] = useState(true);
   const t = window.t ?? ((p: string) => p);
 
-  // 打开面板时加载活动 + 巡检状态
-  useEffect(() => {
-    if (activePanel === 'activity') {
-      hanaFetch('/api/desk/activities')
-        .then(r => r.json())
-        .then(data => setActivities(data.activities || []))
-        .catch(err => console.warn('[activity] fetch activities failed:', err));
-      hanaFetch('/api/config')
-        .then(r => r.json())
-        .then(data => setHbEnabled(data.desk?.heartbeat_enabled !== false))
-        .catch(err => console.warn('[activity] fetch config failed:', err));
-      setDetail(null);
-    }
-  }, [activePanel, setActivities]);
+  const loadData = useCallback(() => {
+    hanaFetch('/api/desk/activities')
+      .then(r => r.json())
+      .then(data => setActivities(data.activities || []))
+      .catch(err => console.warn('[activity] fetch activities failed:', err));
+    fetchConfig()
+      .then(data => setHbEnabled(data.desk?.heartbeat_enabled !== false))
+      .catch(err => console.warn('[activity] fetch config failed:', err));
+    setDetail(null);
+  }, [setActivities]);
+
+  const { visible, close: closePanel } = usePanel('activity', loadData, [currentAgentId]);
+  const close = useCallback(() => { closePanel(); setDetail(null); }, [closePanel]);
 
   const toggleHeartbeat = useCallback(async () => {
     const next = !hbEnabled;
@@ -71,6 +75,7 @@ export function ActivityPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ desk: { heartbeat_enabled: next } }),
       });
+      invalidateConfigCache();
     } catch {
       setHbEnabled(!next); // rollback
     }
@@ -99,19 +104,15 @@ export function ActivityPanel() {
   }, []);
 
   const closeDetail = useCallback(() => setDetail(null), []);
-  const close = useCallback(() => {
-    useStore.getState().setActivePanel(null);
-    setDetail(null);
-  }, []);
 
-  if (activePanel !== 'activity') return null;
+  if (!visible) return null;
 
   return (
     <div className={fp.floatingPanel} id="activityPanel">
       <div className={fp.floatingPanelInner}>
         {detail ? (
           // 详情视图
-          <div id="activityDetailView" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div id="activityDetailView" style={FLEX_COLUMN_STYLE}>
             <div className={fp.floatingPanelHeader}>
               <button className={fp.floatingPanelBack} onClick={closeDetail}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -130,7 +131,7 @@ export function ActivityPanel() {
           </div>
         ) : (
           // 列表视图
-          <div id="activityListView" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div id="activityListView" style={FLEX_COLUMN_STYLE}>
             <div className={fp.floatingPanelHeader}>
               <h2 className={fp.floatingPanelTitle}>{t('activity.title')}</h2>
               <div className={fp.activityHbToggle}>
@@ -208,7 +209,7 @@ function ActivityCard({
   return (
     <div
       className={`${fp.actCard}${a.status === 'error' ? ` ${fp.actCardError}` : ''}`}
-      style={a.sessionFile ? { cursor: 'pointer' } : undefined}
+      style={a.sessionFile ? CURSOR_POINTER_STYLE : undefined}
       onClick={a.sessionFile ? () => onOpen(a.id) : undefined}
     >
       <div className={fp.actCardHead}>
@@ -229,7 +230,7 @@ function ActivityCard({
       </div>
       <div className={fp.actCardMeta}>
         {durationText && <span className={fp.actCardDuration}>{durationText}</span>}
-        {a.status === 'error' && <span style={{ color: 'var(--danger)' }}>{t('activity.error')}</span>}
+        {a.status === 'error' && <span style={DANGER_COLOR_STYLE}>{t('activity.error')}</span>}
         {a.sessionFile && <span className={fp.actCardViewHint}>{t('activity.viewSession')}</span>}
       </div>
     </div>

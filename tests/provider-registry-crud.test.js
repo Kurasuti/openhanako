@@ -91,6 +91,100 @@ describe("getCredentials", () => {
     expect(creds.baseUrl).toBe("https://api.test.com/v1");
     expect(creds.api).toBe("openai-completions");
   });
+
+  it("OAuth provider 无 api_key 时从 auth.json 取 access token", () => {
+    // 写 auth.json
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({
+      "test-oauth-key": {
+        type: "oauth",
+        access: "oauth-access-token-abc",
+        refresh: "refresh-xyz",
+        expires: Date.now() + 3600_000,
+      },
+    }), "utf-8");
+
+    writeAddedModels({
+      "test-oauth": {
+        models: [{ id: "model-a" }],
+      },
+    });
+
+    const reg = new ProviderRegistry(tmpDir);
+    reg._plugins.clear();
+    reg._entries.clear();
+    reg._plugins.set("test-oauth", {
+      id: "test-oauth",
+      displayName: "Test OAuth",
+      authType: "oauth",
+      defaultBaseUrl: "https://api.test.com/v1",
+      defaultApi: "openai-completions",
+      authJsonKey: "test-oauth-key",
+    });
+
+    const creds = reg.getCredentials("test-oauth");
+    expect(creds.apiKey).toBe("oauth-access-token-abc");
+    expect(creds.baseUrl).toBe("https://api.test.com/v1");
+    expect(creds.api).toBe("openai-completions");
+  });
+
+  it("API Key provider 不走 auth.json（即使 auth.json 有同名条目）", () => {
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({
+      "test-provider": { access: "should-not-use-this" },
+    }), "utf-8");
+
+    writeAddedModels({
+      "test-provider": {
+        api_key: "sk-real-key",
+      },
+    });
+
+    const reg = makeRegistry(); // authType: "api-key"
+    const creds = reg.getCredentials("test-provider");
+    expect(creds.apiKey).toBe("sk-real-key");
+  });
+
+  it("API Key provider 无 api_key 时不从 auth.json 补（两条路独立）", () => {
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({
+      "test-provider": { access: "leaked-token" },
+    }), "utf-8");
+
+    writeAddedModels({
+      "test-provider": {
+        // 没有 api_key
+        models: ["m1"],
+      },
+    });
+
+    const reg = makeRegistry(); // authType: "api-key"
+    const creds = reg.getCredentials("test-provider");
+    expect(creds.apiKey).toBe(""); // 不会读到 auth.json 的 leaked-token
+  });
+
+  it("OAuth provider auth.json 无对应条目时 apiKey 为空", () => {
+    // auth.json 存在但没有对应 key
+    const authPath = path.join(tmpDir, "auth.json");
+    fs.writeFileSync(authPath, JSON.stringify({}), "utf-8");
+
+    writeAddedModels({ "test-oauth": { models: ["m1"] } });
+
+    const reg = new ProviderRegistry(tmpDir);
+    reg._plugins.clear();
+    reg._entries.clear();
+    reg._plugins.set("test-oauth", {
+      id: "test-oauth",
+      displayName: "Test OAuth",
+      authType: "oauth",
+      defaultBaseUrl: "https://api.test.com/v1",
+      defaultApi: "openai-completions",
+      authJsonKey: "test-oauth-key",
+    });
+
+    const creds = reg.getCredentials("test-oauth");
+    expect(creds.apiKey).toBe("");
+  });
 });
 
 // ── getProviderModels ────────────────────────────────────────────────────────
@@ -347,6 +441,85 @@ describe("saveProvider", () => {
     const entry = reg.get("test-provider");
     expect(entry).toBeTruthy();
     expect(entry.baseUrl).toBe("https://saved.api.com/v1");
+  });
+});
+
+// ── updateModelEntry type field ───────────────────────────────────────────────
+
+describe("updateModelEntry type field", () => {
+  it("accepts type in updateModelEntry whitelist", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: ["model-a"],
+      },
+    });
+    const reg = makeRegistry();
+    reg.updateModelEntry("test-provider", "model-a", { type: "image" });
+
+    const raw = readAddedModels();
+    const entry = raw["test-provider"].models.find(
+      m => (typeof m === "object" ? m.id : m) === "model-a"
+    );
+    expect(entry).toEqual({ id: "model-a", type: "image" });
+  });
+});
+
+// ── getModelsByType ───────────────────────────────────────────────────────────
+
+describe("getModelsByType", () => {
+  it("returns only image models for a provider", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: [
+          "chat-model",
+          { id: "image-model", type: "image" },
+        ],
+      },
+    });
+    const reg = makeRegistry();
+    const imageModels = reg.getModelsByType("test-provider", "image");
+    expect(imageModels).toHaveLength(1);
+    expect(imageModels[0].id).toBe("image-model");
+  });
+
+  it("returns empty array for provider with no image models", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-123",
+        models: ["chat-model"],
+      },
+    });
+    const reg = makeRegistry();
+    expect(reg.getModelsByType("test-provider", "image")).toEqual([]);
+  });
+});
+
+// ── getAllModelsByType ─────────────────────────────────────────────────────────
+
+describe("getAllModelsByType", () => {
+  it("aggregates image models across providers", () => {
+    writeAddedModels({
+      "test-provider": {
+        api_key: "key-a",
+        models: [{ id: "img-a", type: "image" }],
+      },
+      "other-provider": {
+        api_key: "key-b",
+        models: [{ id: "img-b", type: "image" }, "chat-b"],
+      },
+    });
+    const reg = makeRegistry();
+    reg._plugins.set("other-provider", {
+      id: "other-provider", displayName: "Other", authType: "api-key",
+      defaultBaseUrl: "https://other.com", defaultApi: "openai-completions",
+    });
+
+    const all = reg.getAllModelsByType("image");
+    expect(all).toHaveLength(2);
+    expect(all.map(m => m.id).sort()).toEqual(["img-a", "img-b"]);
+    expect(all.every(m => m.provider)).toBe(true);
   });
 });
 

@@ -120,12 +120,12 @@
 }
 
 .attachImage {
-    width: 120px;
-    height: 90px;
+    max-width: 200px;
+    max-height: 150px;
     background: var(--attach-bg, rgba(0, 0, 0, 0.04));
     border-radius: 8px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-    overflow: hidden;
+    object-fit: contain;
 }
 
 .attachImageImg {
@@ -733,6 +733,7 @@
     background: var(--bg-card, var(--bg));
     border: 1px solid var(--border, rgba(0,0,0,0.1));
     border-radius: var(--radius-lg);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
     overflow: hidden;
     transition: background 0.15s, border-color 0.15s;
 }
@@ -795,6 +796,43 @@
     color: var(--text);
     border-color: var(--text-muted);
     background: var(--overlay-light, rgba(0,0,0,0.04));
+}
+
+/* ── 图片输出卡片 ── */
+
+.imageOutputCard {
+    display: inline-flex;
+    flex-direction: column;
+    max-width: 100%;
+    margin: var(--space-sm) 0;
+    padding: 0.3rem;
+    background: var(--bg-card, var(--bg));
+    border: 0.5px solid var(--border, rgba(0,0,0,0.08));
+    border-radius: var(--radius-lg);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    transition: border-color 0.15s;
+}
+
+.imageOutputCard:hover {
+    border-color: var(--text-muted, rgba(0,0,0,0.2));
+}
+
+.imageOutputPreview {
+    display: block;
+    max-width: 100%;
+    max-height: 450px;
+    object-fit: contain;
+    border-radius: calc(var(--radius-lg) - 0.35rem);
+}
+
+.imageOutputName {
+    padding: 0.35rem 0.2rem 0;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ── 聊天气泡中的 Artifact 卡片 ── */

@@ -184,6 +184,7 @@ export function AgentTab() {
           </div>
           <span className={styles['settings-field-hint']}>{t('settings.agent.chatModelHint')}</span>
         </div>
+        {/* 图片模型选择器暂时隐藏，后续重新设计 */}
       </section>
 
       {/* 关于 Ta */}
