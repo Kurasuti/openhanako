@@ -192,7 +192,6 @@ app.route("/api", createDiaryRoute(engine));
 app.route("/api", createConfirmRoute(confirmStore, engine));
 app.route("/api", createAcpxRoute(engine));
 app.route("/api", createPluginsRoute(engine));
-app.route("/api", createAcpxRoute(engine));
 // internal-browser WS — see unified upgrade handler in server startup below
 
 // 健康检查 + 身份信息
