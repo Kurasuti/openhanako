@@ -415,6 +415,19 @@ export class Agent {
   }
 
   // ════════════════════════════
+  //  外部回调 setter（统一入口，禁止外部直接赋值 _xxx）
+  // ════════════════════════════
+
+  setCallbacks(cb) { this._cb = cb; }
+  setGetOwnerIds(fn) { this._getOwnerIds = fn; }
+  setOnInstallCallback(fn) { this._onInstallCallback = fn; }
+  setNotifyHandler(fn) { this._notifyHandler = fn; }
+  setDescriptionRefreshHandler(fn) { this._descriptionRefreshHandler = fn; }
+  setDmSentHandler(fn) { this._dmSentHandler = fn; }
+  setChannelPostHandler(fn) { this._channelPostHandler = fn; }
+  setUtilityModel(val) { this._utilityModel = val; }
+
+  // ════════════════════════════
   //  状态访问
   // ════════════════════════════
 

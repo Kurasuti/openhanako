@@ -101,7 +101,7 @@ export class ConfigCoordinator {
     if (changed.length) {
       const fresh = this.getSharedModels();
       const agent = this._d.getAgent();
-      agent._utilityModel = fresh.utility || null;
+      agent.setUtilityModel(fresh.utility || null);
       log.log(`setSharedModels: ${changed.join(", ")}`);
     }
   }

@@ -337,17 +337,17 @@ export class Hub {
     const engine = this._engine;
     // 给所有 agent 注入 DM 回调
     for (const [, agent] of engine.agents || []) {
-      agent._dmSentHandler = (fromId, toId) =>
-        this._dmRouter.handleNewDm(fromId, toId);
+      agent.setDmSentHandler((fromId, toId) =>
+        this._dmRouter.handleNewDm(fromId, toId));
     }
   }
 
   _setupNotifyHandler() {
     const agent = this._engine.agent;
     if (!agent) return;
-    agent._notifyHandler = (title, body) => {
+    agent.setNotifyHandler((title, body) => {
       this._eventBus.emit({ type: "notification", title, body }, null);
-    };
+    });
   }
 
 }

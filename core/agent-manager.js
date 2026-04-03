@@ -333,7 +333,7 @@ export class AgentManager {
     // 注入 DM 回调
     const dmRouter = hub?.dmRouter;
     if (dmRouter) {
-      ag._dmSentHandler = (fromId, toId) => dmRouter.handleNewDm(fromId, toId);
+      ag.setDmSentHandler((fromId, toId) => dmRouter.handleNewDm(fromId, toId));
     }
 
     this.invalidateAgentListCache();
@@ -508,10 +508,10 @@ export class AgentManager {
       agentsDir: this._d.agentsDir,
       searchConfigResolver: () => this._d.getSearchConfig(),
     });
-    ag._getOwnerIds = getOwnerIds;
+    ag.setGetOwnerIds(getOwnerIds);
     // 回调注入：Agent 通过 _cb 访问 Engine 能力，不直接持有 Engine 引用
     const getEngine = () => this._d.getEngine?.();
-    ag._cb = {
+    ag.setCallbacks({
       emitDevLog:           (text, level) => getEngine()?.emitDevLog?.(text, level),
       getConfirmStore:      () => getEngine()?.confirmStore ?? null,
       getCurrentSessionPath:() => getEngine()?.currentSessionPath ?? null,
@@ -525,21 +525,21 @@ export class AgentManager {
       resolveUtilityConfig: () => getEngine()?.resolveUtilityConfig?.(),
       getCwd:               () => getEngine()?.cwd ?? "",
       getEngine,  // update-settings-tool 和 ask-agent-tool 仍需要完整 engine
-    };
-    ag._onInstallCallback = async (skillName) => {
+    });
+    ag.setOnInstallCallback(async (skillName) => {
       const skills = this._d.getSkills();
       await skills.reload(this._d.getResourceLoader?.(), this._agents);
       const enabled = new Set(ag.config?.skills?.enabled || []);
       enabled.add(skillName);
       ag.updateConfig({ skills: { enabled: [...enabled] } });
       skills.syncAgentSkills(ag);
-    };
-    ag._notifyHandler = (title, body) => {
+    });
+    ag.setNotifyHandler((title, body) => {
       this._d.getHub()?.eventBus?.emit({ type: "notification", title, body }, null);
-    };
-    ag._descriptionRefreshHandler = () => {
+    });
+    ag.setDescriptionRefreshHandler(() => {
       this._refreshDescription(path.basename(ag.agentDir)).catch(() => {});
-    };
+    });
     return ag;
   }
 
