@@ -509,7 +509,23 @@ export class AgentManager {
       searchConfigResolver: () => this._d.getSearchConfig(),
     });
     ag._getOwnerIds = getOwnerIds;
-    ag._engine = this._d.getEngine?.() || null;
+    // 回调注入：Agent 通过 _cb 访问 Engine 能力，不直接持有 Engine 引用
+    const getEngine = () => this._d.getEngine?.();
+    ag._cb = {
+      emitDevLog:           (text, level) => getEngine()?.emitDevLog?.(text, level),
+      getConfirmStore:      () => getEngine()?.confirmStore ?? null,
+      getCurrentSessionPath:() => getEngine()?.currentSessionPath ?? null,
+      emitEvent:            (event, sp) => getEngine()?._emitEvent?.(event, sp),
+      emitSessionEvent:     (event) => getEngine()?.emitSessionEvent?.(event),
+      getDeferredResults:   () => getEngine()?.deferredResults ?? null,
+      executeIsolated:      (prompt, opts) => getEngine()?.executeIsolated(prompt, opts),
+      getCurrentModelId:    () => getEngine()?.currentModel?.id ?? null,
+      getSkillsDir:         () => getEngine()?.skillsDir ?? null,
+      getLearnSkills:       () => getEngine()?.getLearnSkills?.() ?? {},
+      resolveUtilityConfig: () => getEngine()?.resolveUtilityConfig?.(),
+      getCwd:               () => getEngine()?.cwd ?? "",
+      getEngine,  // update-settings-tool 和 ask-agent-tool 仍需要完整 engine
+    };
     ag._onInstallCallback = async (skillName) => {
       const skills = this._d.getSkills();
       await skills.reload(this._d.getResourceLoader?.(), this._agents);

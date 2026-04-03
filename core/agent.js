@@ -93,6 +93,12 @@ export class Agent {
     this._channelTool = null;
     this._browserTool = null;
     this._notifyTool = null;
+
+    /**
+     * 外部回调注入（由 AgentManager._createAgentInstance 填充）。
+     * Agent 不持有 Engine 引用，所有对 Engine 的需求通过此对象间接访问。
+     */
+    this._cb = null;
   }
 
   // ════════════════════════════
@@ -182,12 +188,12 @@ export class Agent {
       } catch (err) {
         this._memoryModelUnavailableReason = err.message;
         console.warn(`[memory] 记忆系统未启动：大工具模型（utility_large）解析失败 — ${err.message}`);
-        this._engine?.emitDevLog?.(`记忆系统未启动：大工具模型解析失败 — ${err.message}`, "error");
+        this._cb?.emitDevLog?.(`记忆系统未启动：大工具模型解析失败 — ${err.message}`, "error");
       }
     } else if (!this._memoryModel) {
       this._memoryModelUnavailableReason = "utility_large 未配置";
       console.warn("[memory] 记忆系统未启动：大工具模型（utility_large）未配置。请在设置中配置 utility_large 模型以启用记忆功能。");
-      this._engine?.emitDevLog?.("记忆系统未启动：大工具模型（utility_large）未配置", "warn");
+      this._cb?.emitDevLog?.("记忆系统未启动：大工具模型（utility_large）未配置", "warn");
     }
 
     if (this._resolvedMemoryModel) {
@@ -247,28 +253,28 @@ export class Agent {
     );
     this._cronTool = createCronTool(this._cronStore, {
       getAutoApprove: () => this._config?.desk?.cron_auto_approve !== false,
-      confirmStore: this._engine?.confirmStore,
-      emitEvent: (event) => this._engine?._emitEvent(event, this._engine?._sessionCoord?.currentSessionPath),
-      getSessionPath: () => this._engine?._sessionCoord?.currentSessionPath,
+      confirmStore: this._cb?.getConfirmStore?.(),
+      emitEvent: (event) => this._cb?.emitEvent?.(event, this._cb?.getCurrentSessionPath?.()),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
     this._stageFilesTool = createStageFilesTool();
     this._artifactTool = createArtifactTool();
-    this._browserTool = createBrowserTool(() => this._engine?._sessionCoord?.currentSessionPath);
+    this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.());
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
     });
 
     this._checkDeferredTool = createCheckDeferredTool({
-      getDeferredStore: () => this._engine?.deferredResults,
-      getSessionPath: () => this._engine?._sessionCoord?.currentSessionPath,
+      getDeferredStore: () => this._cb?.getDeferredResults?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
 
     // 10. 设置修改工具
     this._updateSettingsTool = createUpdateSettingsTool({
-      getEngine: () => this._engine,
-      getConfirmStore: () => this._engine?.confirmStore,
-      getSessionPath: () => this._engine?.currentSessionPath,
-      emitEvent: (event) => this._engine?.emitSessionEvent(event),
+      getEngine: () => this._cb?.getEngine?.(),
+      getConfirmStore: () => this._cb?.getConfirmStore?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      emitEvent: (event) => this._cb?.emitSessionEvent?.(event),
     });
 
     // 9. 频道工具 + 私信工具（需要 channelsDir 和 agentsDir）
@@ -328,9 +334,9 @@ export class Agent {
       this._askAgentTool = createAskAgentTool({
         agentId,
         listAgents,
-        engine: this._engine,
-        getDeferredStore: () => this._engine?.deferredResults,
-        getSessionPath: () => this._engine?._sessionCoord?.currentSessionPath,
+        engine: this._cb?.getEngine?.(),
+        getDeferredStore: () => this._cb?.getDeferredResults?.(),
+        getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
       });
 
       this._dmTool = createDmTool({
@@ -344,16 +350,16 @@ export class Agent {
     // 10. install_skill 工具（需要 agentDir + config + engine.resolveUtilityConfig）
     this._installSkillTool = createInstallSkillTool({
       agentDir: this.agentDir,
-      getUserSkillsDir: () => this._engine?.skillsDir,
+      getUserSkillsDir: () => this._cb?.getSkillsDir?.(),
       getConfig: () => {
         const cfg = { ...this._config };
         // learn_skills 从全局 preferences 注入（覆盖 agent config 中的值）
-        const globalLearn = this._engine?.getLearnSkills?.() || {};
+        const globalLearn = this._cb?.getLearnSkills?.() || {};
         if (!cfg.capabilities) cfg.capabilities = {};
         cfg.capabilities = { ...cfg.capabilities, learn_skills: globalLearn };
         return cfg;
       },
-      resolveUtilityConfig: () => this._engine?.resolveUtilityConfig?.(),
+      resolveUtilityConfig: () => this._cb?.resolveUtilityConfig?.(),
       onInstalled: async (skillName) => {
         await this._onInstallCallback?.(skillName);
       },
@@ -362,13 +368,13 @@ export class Agent {
     // 11. subagent 工具
     this._subagentTool = createSubagentTool({
       executeIsolated: (prompt, opts) => {
-        if (!this._engine) throw new Error("subagent 调用失败：engine 未初始化");
-        return this._engine.executeIsolated(prompt, opts);
+        if (!this._cb?.executeIsolated) throw new Error("subagent 调用失败：engine 未初始化");
+        return this._cb.executeIsolated(prompt, opts);
       },
-      resolveUtilityModel: () => this._engine?.currentModel?.id || null,
+      resolveUtilityModel: () => this._cb?.getCurrentModelId?.() || null,
       readOnlyBuiltinTools: READ_ONLY_BUILTIN_TOOLS,
-      getDeferredStore: () => this._engine?.deferredResults,
-      getSessionPath: () => this._engine?._sessionCoord?.currentSessionPath,
+      getDeferredStore: () => this._cb?.getDeferredResults?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
 
     // 12. 组装 system prompt
@@ -699,7 +705,7 @@ export class Agent {
 
     // 主动技能获取引导（仅在 allow_github_fetch 开启时注入）
     // learn_skills 从全局 preferences 读取
-    const learnCfg = this._engine?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
+    const learnCfg = this._cb?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
     if (learnCfg.enabled && learnCfg.allow_github_fetch) {
       parts.push(isZh
         ? "\n## 主动技能获取\n\n" +
@@ -759,7 +765,7 @@ export class Agent {
     }
 
     // 书桌 = 当前工作目录（注入实际路径）
-    const cwdPath = this._engine?.cwd || "";
+    const cwdPath = this._cb?.getCwd?.() || "";
     parts.push(isZh
       ? `\n## 书桌\n\n` +
         `用户所说的「书桌」「工作空间」指的是你当前的工作目录（cwd），不是系统桌面（~/Desktop）。` +
