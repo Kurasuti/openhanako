@@ -324,6 +324,30 @@
     text-underline-offset: 2px;
 }
 
+:global(.cm-table-widget) {
+    margin: var(--space-xs) 0;
+    overflow-x: auto;
+}
+
+:global(.cm-table-widget table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+    font-family: var(--font-serif);
+}
+
+:global(.cm-table-widget th),
+:global(.cm-table-widget td) {
+    border: 1px solid var(--border);
+    padding: 0.3em 0.6em;
+    text-align: left;
+}
+
+:global(.cm-table-widget th) {
+    background: var(--overlay-light);
+    font-weight: 600;
+}
+
 /* 拖拽中禁 transition */
 :global(body.resizing) .previewPanel,
 :global(body.resizing) .previewPanelInner {

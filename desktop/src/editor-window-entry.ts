@@ -23,6 +23,7 @@ import { markdownHighlight, codeHighlight } from './react/editor/highlight';
 import { markdownTheme, codeTheme } from './react/editor/theme';
 import { markdownDecoPlugin } from './react/editor/md-decorations';
 import { linkClickHandler } from './react/editor/link-handler';
+import { tableDecoField } from './react/editor/table-field';
 
 const SAVE_DELAY = 600;
 
@@ -36,7 +37,7 @@ const btnClose = document.getElementById('btnClose')!;
 
 let filePath: string | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
-let selfSave = false;
+let lastSavedContent = '';
 let editorView: EditorView | null = null;
 
 function createEditor(content: string, isMd: boolean) {
@@ -73,6 +74,7 @@ function createEditor(content: string, isMd: boolean) {
       syntaxHighlighting(isMd ? markdownHighlight : codeHighlight),
     ),
     concealComp.of(isMd ? markdownDecoPlugin : []),
+    ...(isMd ? [tableDecoField] : []),
     themeComp.of(isMd ? markdownTheme : codeTheme),
     linkClickHandler,
   ];

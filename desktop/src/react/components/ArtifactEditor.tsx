@@ -28,6 +28,7 @@ import { markdownHighlight, codeHighlight } from '../editor/highlight';
 import { markdownTheme, codeTheme } from '../editor/theme';
 import { markdownDecoPlugin } from '../editor/md-decorations';
 import { linkClickHandler } from '../editor/link-handler';
+import { tableDecoField } from '../editor/table-field';
 
 /* ── Types ── */
 
@@ -66,7 +67,7 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const selfSaveRef = useRef(false);
+    const lastSavedContentRef = useRef<string>(content);
     const filePathRef = useRef(filePath);
     filePathRef.current = filePath;
     const selectionCbRef = useRef(onSelectionChange);
@@ -89,11 +90,8 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
     const saveToFile = useCallback((text: string) => {
       const fp = filePathRef.current;
       if (!fp) return;
-      window.platform?.writeFile(fp, text).finally(() => {
-        setTimeout(() => {
-          if (!saveTimerRef.current) selfSaveRef.current = false;
-        }, 300);
-      });
+      lastSavedContentRef.current = text;
+      window.platform?.writeFile(fp, text);
     }, []);
 
     // Create editor
@@ -110,7 +108,6 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
-          selfSaveRef.current = true;
           const text = update.state.doc.toString();
           if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
           saveTimerRef.current = setTimeout(() => {
@@ -132,6 +129,7 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
           syntaxHighlighting(isMd ? markdownHighlight : codeHighlight),
         ),
         c.conceal.of(isMd ? markdownDecoPlugin : []),
+        ...(isMd ? [tableDecoField] : []),
         c.theme.of(isMd ? markdownTheme : codeTheme),
         linkClickHandler,
       ];
@@ -150,10 +148,10 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
       };
     }, [mode, language]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅在 mode/language 变化时重建 CodeMirror，content/refs 故意省略以避免销毁重建
 
-    // content prop change → update editor (skip during active editing)
+    // content prop change → update editor (skip if already in sync)
     useEffect(() => {
       const view = viewRef.current;
-      if (!view || selfSaveRef.current) return;
+      if (!view) return;
       const current = view.state.doc.toString();
       if (current !== content) {
         view.dispatch({
@@ -171,17 +169,18 @@ export const ArtifactEditor = forwardRef<ArtifactEditorHandle, ArtifactEditorPro
       const handler = (e: Event) => {
         const changedPath = (e as CustomEvent).detail;
         if (changedPath !== filePath) return;
-        if (selfSaveRef.current) return;
         window.platform?.readFile(filePath).then((newContent) => {
           if (newContent == null) return;
+          // Content comparison: same as last write → self-write, ignore
+          if (newContent === lastSavedContentRef.current) return;
           const view = viewRef.current;
           if (!view) return;
           const current = view.state.doc.toString();
-          if (current !== newContent) {
-            view.dispatch({
-              changes: { from: 0, to: current.length, insert: newContent },
-            });
-          }
+          if (current === newContent) return;
+          lastSavedContentRef.current = newContent;
+          view.dispatch({
+            changes: { from: 0, to: current.length, insert: newContent },
+          });
         });
       };
 
