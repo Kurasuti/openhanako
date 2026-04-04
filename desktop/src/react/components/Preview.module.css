@@ -272,6 +272,15 @@
     border-top: 1px solid var(--border);
 }
 
+:global(.cm-checkbox) {
+    cursor: pointer;
+    accent-color: var(--accent);
+    margin-right: 0.3em;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+}
+
 /* 拖拽中禁 transition */
 :global(body.resizing) .previewPanel,
 :global(body.resizing) .previewPanelInner {

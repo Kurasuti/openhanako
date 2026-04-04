@@ -5,6 +5,8 @@ import type { DecorationSet, ViewUpdate } from '@codemirror/view';
 import { RangeSetBuilder } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { hrDecoration } from './widgets/hr';
+import { handleCheckbox } from './widgets/checkbox';
+import { handleBlockquote } from './widgets/blockquote';
 
 export type DecoRange = { from: number; to: number; deco: Decoration };
 
@@ -13,7 +15,7 @@ const centerLineDeco = Decoration.line({ class: 'cm-center-line' });
 
 export const CONCEAL_MARKS = new Set([
   'HeaderMark', 'EmphasisMark', 'CodeMark', 'StrikethroughMark',
-  'LinkMark', 'URL',
+  'LinkMark', 'URL', 'QuoteMark',
 ]);
 
 export function collectActiveLines(view: EditorView): Set<number> {
@@ -48,6 +50,12 @@ export function buildMarkdownDecorations(view: EditorView): DecorationSet {
               ranges.push({ from: line.from, to: line.from, deco: centerLineDeco });
             }
             return;
+          case 'TaskMarker':
+            handleCheckbox({ view, node, ranges });
+            return;
+          case 'Blockquote':
+            handleBlockquote({ view, node, ranges });
+            return;
         }
 
         // ── 活跃行：跳过所有 conceal / replace ──
@@ -57,7 +65,7 @@ export function buildMarkdownDecorations(view: EditorView): DecorationSet {
         switch (node.name) {
           // conceal marks
           case 'HeaderMark': case 'EmphasisMark': case 'CodeMark':
-          case 'StrikethroughMark': case 'LinkMark': case 'URL': {
+          case 'StrikethroughMark': case 'LinkMark': case 'URL': case 'QuoteMark': {
             let hideTo = node.to;
             if (node.name === 'HeaderMark') {
               const next = view.state.doc.sliceString(hideTo, hideTo + 1);
