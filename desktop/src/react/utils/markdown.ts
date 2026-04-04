@@ -6,6 +6,7 @@
 
 import markdownit from 'markdown-it';
 import mk from '@traptitech/markdown-it-katex';
+import taskLists from 'markdown-it-task-lists';
 import 'katex/dist/katex.min.css';
 
 type MarkdownIt = ReturnType<typeof markdownit>;
@@ -22,6 +23,7 @@ export function getMd(): MarkdownIt {
     typographer: true,
   });
   _md.use(mk);
+  _md.use(taskLists, { enabled: false, label: true });
   return _md;
 }
 
