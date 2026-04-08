@@ -85,12 +85,12 @@ export class ChannelRouter {
    * agent 用 channel tool 发消息后，触发其他 agent 的 triage
    */
   setupPostHandler() {
-    this._engine.agent._channelPostHandler = (channelName, senderId) => {
+    this._engine.agent.setChannelPostHandler((channelName, senderId) => {
       debugLog()?.log("channel", `agent ${senderId} posted to #${channelName}, triggering triage`);
       this.triggerImmediate(channelName)?.catch(err =>
         console.error(`[channel] agent post triage 失败: ${err.message}`)
       );
-    };
+    });
   }
 
   // ──────────── 频道 Agent 顺序 ────────────

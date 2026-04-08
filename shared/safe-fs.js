@@ -51,6 +51,16 @@ export function safeReadYAMLSync(filePath, fallback = null, yaml) {
 }
 
 /**
+ * Atomic file write: write to tmp, then rename over target.
+ * Prevents partial writes if the process crashes mid-write.
+ */
+export function atomicWriteSync(filePath, content) {
+  const tmp = filePath + ".tmp";
+  fs.writeFileSync(tmp, content, "utf-8");
+  fs.renameSync(tmp, filePath);
+}
+
+/**
  * Atomic directory copy with rollback.
  * 1. Copy src -> dst.tmp_{ts}
  * 2. If dst exists, rename dst -> dst.bak_{ts}

@@ -49,6 +49,8 @@ import {
 import { debugLog } from "../lib/debug-log.js";
 import { createSandboxedTools } from "../lib/sandbox/index.js";
 import { t } from "../server/i18n.js";
+import { CheckpointStore } from "../lib/checkpoint-store.js";
+import { wrapWithCheckpoint } from "../lib/checkpoint-wrapper.js";
 
 export class HanaEngine {
   /**
@@ -78,7 +80,7 @@ export class HanaEngine {
       channelsDir: this.channelsDir,
       agentsDir: this.agentsDir,
       userDir: this.userDir,
-      getHub: () => this._hub,
+      getHub: () => this._hubCallbacks,
     });
 
     // ── Agent Manager ──
@@ -89,7 +91,7 @@ export class HanaEngine {
       channelsDir: this.channelsDir,
       getPrefs: () => this._prefs,
       getModels: () => this._models,
-      getHub: () => this._hub,
+      getHub: () => this._hubCallbacks,
       getSkills: () => this._skills,
       getSearchConfig: () => this.getSearchConfig(),
       resolveUtilityConfig: () => this.resolveUtilityConfig(),
@@ -121,6 +123,7 @@ export class HanaEngine {
       getAgentById: (id) => this._agentMgr.getAgent(id),
       listAgents: () => this.listAgents(),
       getConfirmStore: () => this._confirmStore,
+      getDeferredResultStore: () => this._deferredResultStore,
     });
 
     // ── Config Coordinator ──
@@ -128,13 +131,15 @@ export class HanaEngine {
       hanakoHome,
       agentsDir: this.agentsDir,
       getAgent: () => this.agent,
+      getAgentById: (id) => this._agentMgr.getAgent(id),
+      getActiveAgentId: () => this._agentMgr.activeAgentId,
       getAgents: () => this._agentMgr.agents,
       getModels: () => this._models,
       getPrefs: () => this._prefs,
       getSkills: () => this._skills,
       getSession: () => this._sessionCoord.session,
       getSessionCoordinator: () => this._sessionCoord,
-      getHub: () => this._hub,
+      getHub: () => this._hubCallbacks,
       emitEvent: (e, sp) => this._emitEvent(e, sp),
       emitDevLog: (t, l) => this.emitDevLog(t, l),
       getCurrentModel: () => this.currentModel?.name,
@@ -151,11 +156,19 @@ export class HanaEngine {
       getHomeCwd: () => this.homeCwd,
     });
 
+    // Checkpoint 备份存储
+    this._checkpointStore = new CheckpointStore(
+      path.join(this.hanakoHome, "checkpoints")
+    );
+
     // ── Plugin Manager ──
     this._pluginManager = null;  // initialized async in initPlugins()
 
     // Pi SDK resources（init 时填充）
     this._resourceLoader = null;
+
+    // Hub 回调（由 Hub 构造后通过 setHubCallbacks 注入，替代旧的 engine._hub 双向引用）
+    this._hubCallbacks = null;
 
     // 事件系统
     this._listeners = new Set();
@@ -189,6 +202,14 @@ export class HanaEngine {
         this._emitEvent({ type: "confirmation_resolved", confirmId, action }, null);
       };
     }
+  }
+
+  setDeferredResultStore(store) {
+    this._deferredResultStore = store;
+  }
+
+  get deferredResults() {
+    return this._deferredResultStore || null;
   }
 
   // 向后兼容 getter
@@ -265,10 +286,14 @@ export class HanaEngine {
 
   get config() { return this.agent.config; }
   get factStore() { return this.agent.factStore; }
+  /** 下一次新对话将使用的模型（UI 选择器绑定此值） */
   get currentModel() {
     return this._sessionCoord.pendingModel
-      ?? this._sessionCoord.session?.model
       ?? this._models.currentModel;
+  }
+  /** 当前活跃 session 实际使用的模型（已创建的对话不随选择器变） */
+  get activeSessionModel() {
+    return this._sessionCoord.session?.model ?? null;
   }
   get availableModels() { return this._models.availableModels; }
   get memoryEnabled() { return this.agent.memoryEnabled; }
@@ -301,6 +326,15 @@ export class HanaEngine {
   setThinkingLevel(l) { return this._configCoord.setThinkingLevel(l); }
   getSandbox() { return this._prefs.getSandbox(); }
   setSandbox(v) { this._prefs.setSandbox(v); }
+  getFileBackup() { return this._prefs.getFileBackup(); }
+  setFileBackup(p) { this._prefs.setFileBackup(p); }
+  listCheckpoints() { return this._checkpointStore.list(); }
+  restoreCheckpoint(id) { return this._checkpointStore.restore(id); }
+  removeCheckpoint(id) { return this._checkpointStore.remove(id); }
+  cleanupCheckpoints() {
+    const cfg = this._prefs.getFileBackup();
+    return this._checkpointStore.cleanup(cfg.retention_days || 1);
+  }
   getLearnSkills() { return this._prefs.getLearnSkills(); }
   setLearnSkills(p) { this._prefs.setLearnSkills(p); }
   getLocale() { return this._prefs.getLocale(); }
@@ -313,7 +347,7 @@ export class HanaEngine {
   setMemoryMasterEnabled(id, v) { return this._configCoord.setMemoryMasterEnabled(id, v); }
   persistSessionMeta() { return this._configCoord.persistSessionMeta(); }
   setPlanMode(enabled) { return this._sessionCoord.setPlanMode(enabled, allBuiltInTools); }
-  async updateConfig(p) { return this._configCoord.updateConfig(p); }
+  async updateConfig(p, opts) { return this._configCoord.updateConfig(p, opts); }
 
   getPreferences() { return this._readPreferences(); }
   savePreferences(p) { return this._writePreferences(p); }
@@ -345,8 +379,8 @@ export class HanaEngine {
     return this._skills.getAllSkills(ag || this.agent);
   }
   _getSkillsForAgent(ag) { return this._skills.getSkillsForAgent(ag); }
-  get skillsDir() { return this._skills.skillsDir; }
-  get userSkillsDir() { return this._skills.skillsDir; }
+  get skillsDir() { return this._skills?.skillsDir; }
+  get userSkillsDir() { return this._skills?.skillsDir; }
   get learnedSkillsDir() { return path.join(this.agent.agentDir, "learned-skills"); }
   get modelsJsonPath() { return this._models.modelsJsonPath; }
   get authJsonPath() { return this._models.authJsonPath; }
@@ -572,8 +606,33 @@ export class HanaEngine {
     const sandboxEnabled = this._readPreferences().sandbox !== false;
     log(`✿ 沙盒${sandboxEnabled ? "已启用" : "已关闭"}`);
 
+    // 9. 清理过期的 .ephemeral session 文件（>7 天）
+    this._cleanEphemeralSessions();
+
     const totalTime = ((Date.now() - startupTimer) / 1000).toFixed(1);
     log(`✿ 初始化完成（${totalTime}s）`);
+  }
+
+  /** 清理所有 agent 的 .ephemeral/ 目录中超过 7 天的文件 */
+  _cleanEphemeralSessions() {
+    const maxAge = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    try {
+      if (!this.agentsDir || !fs.existsSync(this.agentsDir)) return;
+      for (const entry of fs.readdirSync(this.agentsDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const ephDir = path.join(this.agentsDir, entry.name, '.ephemeral');
+        if (!fs.existsSync(ephDir)) continue;
+        for (const file of fs.readdirSync(ephDir)) {
+          if (!file.endsWith('.jsonl')) continue;
+          const filePath = path.join(ephDir, file);
+          try {
+            const stat = fs.statSync(filePath);
+            if (now - stat.mtimeMs > maxAge) fs.unlinkSync(filePath);
+          } catch { /* best effort */ }
+        }
+      }
+    } catch { /* best effort */ }
   }
 
   async dispose() {
@@ -603,11 +662,20 @@ export class HanaEngine {
     const userPluginsDir = path.join(this.hanakoHome, "plugins");
     const pluginDataDir = path.join(this.hanakoHome, "plugin-data");
 
+    // Read app version for plugin compatibility check
+    let appVersion = "0.0.0";
+    try {
+      const pkgPath = path.join(this.productDir, "..", "package.json");
+      appVersion = JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version || "0.0.0";
+    } catch {}
+
     this._pluginManager = new PluginManager({
       pluginsDirs: [builtinPluginsDir, userPluginsDir],
       dataDir: pluginDataDir,
       bus,
       preferencesManager: this._prefs,
+      appVersion,
+      getSessionPath: () => this.currentSessionPath,
     });
     this._pluginManager.scan();
     await this._pluginManager.loadAll();
@@ -630,9 +698,22 @@ export class HanaEngine {
    * 在 initPlugins 以及任何插件热操作后调用。
    */
   _syncExtensionFactories() {
-    if (!this._pluginManager || !this._extensionFactories) return;
-    // 保留首个内置 factory（空 tools 剥离），替换后续所有插件 factory
-    this._extensionFactories.splice(1, Infinity, ...this._pluginManager.getExtensionFactories());
+    if (!this._extensionFactories) return;
+    const frameworkFactories = this._frameworkExtFactories || [];
+    const pluginFactories = this._pluginManager?.getExtensionFactories() || [];
+    this._extensionFactories.splice(1, Infinity, ...frameworkFactories, ...pluginFactories);
+  }
+
+  /**
+   * Register a framework-level extension factory.
+   * Tracked separately so _syncExtensionFactories preserves them across plugin hot-reloads.
+   * Only affects sessions created after this call.
+   */
+  registerExtensionFactory(factory) {
+    if (!this._extensionFactories) return;
+    if (!this._frameworkExtFactories) this._frameworkExtFactories = [];
+    this._frameworkExtFactories.push(factory);
+    this._syncExtensionFactories();
   }
 
   get pluginManager() { return this._pluginManager; }
@@ -657,20 +738,43 @@ export class HanaEngine {
 
     const effectiveAgentDir = opts.agentDir || this.agent.agentDir;
     const effectiveWorkspace = opts.workspace !== undefined ? opts.workspace : this.homeCwd;
-    const sandboxEnabled = this._readPreferences().sandbox !== false;
-    const effectiveMode = opts.mode || (sandboxEnabled ? "standard" : "full-access");
 
-    return createSandboxedTools(cwd, allTools, {
+    let result = createSandboxedTools(cwd, allTools, {
       agentDir: effectiveAgentDir,
       workspace: effectiveWorkspace,
       hanakoHome: this.hanakoHome,
-      mode: effectiveMode,
+      getSandboxEnabled: () => this._readPreferences().sandbox !== false,
     });
+
+    // Checkpoint wrapper (outside sandbox layer)
+    const backupCfg = this._prefs.getFileBackup();
+    if (backupCfg.enabled) {
+      const getSessionPath = opts.getSessionPath || (() => null);
+      result = {
+        ...result,
+        tools: wrapWithCheckpoint(result.tools, {
+          store: this._checkpointStore,
+          maxFileSizeKb: backupCfg.max_file_size_kb,
+          cwd,
+          getSessionPath,
+        }),
+      };
+    }
+
+    return result;
   }
 
   // ════════════════════════════
   //  事件系统
   // ════════════════════════════
+
+  /**
+   * Hub 构造后注入回调，替代旧的 engine._hub = this 双向引用。
+   * Manager 通过 getHub() lazy getter 拿到这个对象。
+   */
+  setHubCallbacks(callbacks) {
+    this._hubCallbacks = callbacks;
+  }
 
   setEventBus(bus) {
     for (const fn of this._listeners) bus.subscribe(fn);
@@ -799,11 +903,5 @@ export class HanaEngine {
   //  巡检工具白名单（向后兼容静态引用）
   // ════════════════════════════
 
-  static PATROL_TOOLS_DEFAULT = [
-    "search_memory", "pin_memory", "unpin_memory",
-    "recall_experience", "record_experience",
-    "web_search", "web_fetch",
-    "todo", "notify",
-    "stage_files",
-  ];
+  static PATROL_TOOLS_DEFAULT = "*";
 }

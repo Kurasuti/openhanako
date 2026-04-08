@@ -5,27 +5,82 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import { MarkdownContent } from './MarkdownContent';
 import { AttachmentChip } from '../shared/AttachmentChip';
-import type { ChatMessage, UserAttachment, DeskContext } from '../../stores/chat-types';
+import { MessageActions } from './MessageActions';
+const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeScreenshot);
+import type { ChatMessage, UserAttachment, DeskContext, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
+import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import styles from './Chat.module.css';
+import badgeStyles from '../input/SkillBadgeView.module.css';
 
 interface Props {
   message: ChatMessage;
   showAvatar: boolean;
+  sessionPath: string;
 }
 
-export const UserMessage = memo(function UserMessage({ message, showAvatar }: Props) {
+export const UserMessage = memo(function UserMessage({ message, showAvatar, sessionPath }: Props) {
   const userAvatarUrl = useStore(s => s.userAvatarUrl);
   const t = window.t ?? ((p: string) => p);
   const userName = useStore(s => s.userName) || t('common.me');
   const [avatarFailed, setAvatarFailed] = useState(false);
 
+  const isStreaming = useStore(s => selectIsStreamingSession(s, sessionPath));
+  const selectedIds = useStore(s => selectSelectedIdsBySession(s, sessionPath));
+  const isSelected = selectedIds.includes(message.id);
+
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     setAvatarFailed(false);
   }, [userAvatarUrl]);
 
+  const handleCopy = useCallback(() => {
+    const state = useStore.getState();
+    const ids = selectSelectedIdsBySession(state, sessionPath);
+
+    if (ids.length > 0) {
+      const session = state.chatSessions[sessionPath];
+      if (!session) return;
+      const texts: string[] = [];
+      for (const item of session.items) {
+        if (item.type !== 'message') continue;
+        if (!ids.includes(item.data.id)) continue;
+        if (item.data.role === 'user') {
+          texts.push(item.data.text || '');
+        } else {
+          const textBlocks = (item.data.blocks || []).filter(
+            (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
+          );
+          if (textBlocks.length === 0) continue;
+          // eslint-disable-next-line no-restricted-syntax
+          const tmp = document.createElement('div');
+          tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
+          texts.push(tmp.innerText.trim());
+        }
+      }
+      navigator.clipboard.writeText(texts.join('\n\n')).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }).catch(() => {});
+    } else {
+      const text = message.text || '';
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }).catch(() => {});
+    }
+  }, [message.text, sessionPath]);
+
+  const handleScreenshot = useCallback(async () => {
+    const fn = await lazyScreenshot();
+    fn(message.id, sessionPath);
+  }, [message.id, sessionPath]);
+
   return (
-    <div className={`${styles.messageGroup} ${styles.messageGroupUser}`}>
+    <div className={`${styles.messageGroup} ${styles.messageGroupUser}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
+         data-message-id={message.id}>
       {showAvatar && (
         <div className={`${styles.avatarRow} ${styles.avatarRowUser}`}>
           <span className={styles.avatarName}>{userName}</span>
@@ -55,8 +110,26 @@ export const UserMessage = memo(function UserMessage({ message, showAvatar }: Pr
         <UserAttachmentsView attachments={message.attachments} deskContext={message.deskContext} />
       )}
       <div className={`${styles.message} ${styles.messageUser}`}>
+        {message.skills && message.skills.length > 0 && message.skills.map(skillName => (
+          <span key={skillName} className={badgeStyles.badge} style={{ cursor: 'default' }}>
+            <svg className={badgeStyles.icon} width="13" height="13" viewBox="0 0 16 16" fill="none"
+              stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round">
+              <path d="M8 1 L9.5 6 L15 8 L9.5 10 L8 15 L6.5 10 L1 8 L6.5 6 Z" />
+            </svg>
+            <span className={badgeStyles.name}>{skillName}</span>
+          </span>
+        ))}
         {message.textHtml && <MarkdownContent html={message.textHtml} />}
       </div>
+      <MessageActions
+        messageId={message.id}
+        sessionPath={sessionPath}
+        align="left"
+        onCopy={handleCopy}
+        onScreenshot={handleScreenshot}
+        copied={copied}
+        isStreaming={isStreaming}
+      />
     </div>
   );
 });

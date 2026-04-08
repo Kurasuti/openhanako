@@ -5,6 +5,7 @@
 import { memo, useState, useCallback } from 'react';
 import styles from './Chat.module.css';
 import { extractToolDetail } from '../../utils/message-parser';
+import type { ToolDetail } from '../../utils/message-parser';
 
 import type { ToolCall } from '../../stores/chat-types';
 
@@ -69,6 +70,17 @@ export const ToolGroupBlock = memo(function ToolGroupBlock({ tools, collapsed: i
 
 // ── ToolIndicator ──
 
+function handleDetailClick(e: React.MouseEvent, detail: ToolDetail) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!detail.href) return;
+  if (detail.hrefType === 'file') {
+    window.platform?.showInFinder?.(detail.href);
+  } else {
+    window.platform?.openExternal?.(detail.href);
+  }
+}
+
 const ToolIndicator = memo(function ToolIndicator({ tool, agentName }: { tool: ToolCall; agentName: string }) {
   const detail = extractToolDetail(tool.name, tool.args);
   const label = getToolLabel(tool.name, tool.done ? 'done' : 'running', agentName);
@@ -77,17 +89,31 @@ const ToolIndicator = memo(function ToolIndicator({ tool, agentName }: { tool: T
   const tag = tool.args?.agentId as string | undefined;
 
   return (
-    <div className={styles.toolIndicator} data-tool={tool.name} data-done={String(tool.done)}>
-      <span className={styles.toolDesc}>{label}</span>
-      {detail && <span className={styles.toolDetail}>{detail}</span>}
-      {tag && <span className={styles.toolTag}>{tag}</span>}
-      {tool.done ? (
-        <span className={`${styles.toolStatus} ${tool.success ? styles.toolStatusDone : styles.toolStatusFailed}`}>
-          {tool.success ? '✓' : '✗'}
-        </span>
-      ) : (
-        <span className={styles.toolDots}><span /><span /><span /></span>
-      )}
-    </div>
+    <>
+      <div className={styles.toolIndicator} data-tool={tool.name} data-done={String(tool.done)}>
+        <span className={styles.toolDesc}>{label}</span>
+        {detail.text && (
+          detail.href ? (
+            <span
+              className={`${styles.toolDetail} ${styles.toolDetailLink}`}
+              title={detail.href}
+              onClick={(e) => handleDetailClick(e, detail)}
+            >
+              {detail.text}
+            </span>
+          ) : (
+            <span className={styles.toolDetail}>{detail.text}</span>
+          )
+        )}
+        {tag && <span className={styles.toolTag}>{tag}</span>}
+        {tool.done ? (
+          <span className={`${styles.toolStatus} ${tool.success ? styles.toolStatusDone : styles.toolStatusFailed}`}>
+            {tool.success ? '✓' : '✗'}
+          </span>
+        ) : (
+          <span className={styles.toolDots}><span /><span /><span /></span>
+        )}
+      </div>
+    </>
   );
 });

@@ -27,8 +27,9 @@ function isEditable(artifact: Artifact | null): boolean {
   return !!artifact.filePath && EDITABLE_TYPES.has(artifact.type);
 }
 
-function getEditorMode(artifact: Artifact): 'markdown' | 'code' | 'text' {
+function getEditorMode(artifact: Artifact): 'markdown' | 'code' | 'csv' | 'text' {
   if (artifact.type === 'markdown') return 'markdown';
+  if (artifact.type === 'csv') return 'csv';
   return 'code';
 }
 

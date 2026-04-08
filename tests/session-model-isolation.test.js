@@ -156,22 +156,27 @@ describe("Session model isolation", () => {
     expect(coord.session.model).toBe(MODEL_DEFAULT);
   });
 
-  it("engine.currentModel 优先级: session.model > pendingModel > defaultModel", () => {
+  it("engine.currentModel 优先级: pendingModel > defaultModel（不含 session.model）", () => {
     const models = makeMockModels();
     const coord = makeMockSessionCoordinator(models);
 
-    const getCurrent = () => coord.session?.model ?? coord.pendingModel ?? models.currentModel;
+    // currentModel = UI 选择器绑定，不受活跃 session 影响
+    const getCurrent = () => coord.pendingModel ?? models.currentModel;
+    // activeSessionModel = 当前 session 实际使用的模型
+    const getActiveSession = () => coord.session?.model ?? null;
 
     // 无 session 无 pending → defaultModel
     expect(getCurrent()).toBe(MODEL_DEFAULT);
+    expect(getActiveSession()).toBe(null);
 
     // 设 pending → pendingModel
     coord.setPendingModel(MODEL_B);
     expect(getCurrent()).toBe(MODEL_B);
 
-    // 创建 session → session.model 优先
+    // 创建 session → currentModel 回到 defaultModel，session 用自己的模型
     coord.createSession(null, null, true, MODEL_A);
-    expect(getCurrent()).toBe(MODEL_A);
+    expect(getCurrent()).toBe(MODEL_DEFAULT);
+    expect(getActiveSession()).toBe(MODEL_A);
   });
 
   it("多 session 并行运行各自用创建时的模型", () => {

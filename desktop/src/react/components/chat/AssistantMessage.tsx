@@ -7,14 +7,17 @@ import { MarkdownContent } from './MarkdownContent';
 import { MoodBlock } from './MoodBlock';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolGroupBlock } from './ToolGroupBlock';
+import { PluginCardBlock } from './PluginCardBlock';
 import { XingCard } from './XingCard';
 import { SettingsConfirmCard } from './SettingsConfirmCard';
+import { MessageActions } from './MessageActions';
+const lazyScreenshot = () => import('../../utils/screenshot').then(m => m.takeScreenshot);
 import type { ChatMessage, ContentBlock } from '../../stores/chat-types';
 import { useStore } from '../../stores';
 import { hanaFetch, hanaUrl } from '../../hooks/use-hana-fetch';
-import { useI18n } from '../../hooks/use-i18n';
 import { openFilePreview, openSkillPreview } from '../../utils/file-preview';
 import { openPreview } from '../../stores/artifact-actions';
+import { selectIsStreamingSession, selectSelectedIdsBySession } from '../../stores/session-selectors';
 import styles from './Chat.module.css';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -22,13 +25,17 @@ import styles from './Chat.module.css';
 interface Props {
   message: ChatMessage;
   showAvatar: boolean;
+  sessionPath: string;
   agentId?: string | null;
 }
 
-export const AssistantMessage = memo(function AssistantMessage({ message, showAvatar, agentId }: Props) {
+export const AssistantMessage = memo(function AssistantMessage({ message, showAvatar, sessionPath, agentId }: Props) {
   const agents = useStore(s => s.agents);
   const globalAgentName = useStore(s => s.agentName) || 'Hanako';
   const globalYuan = useStore(s => s.agentYuan) || 'hanako';
+  const isStreaming = useStore(s => selectIsStreamingSession(s, sessionPath));
+  const selectedIds = useStore(s => selectSelectedIdsBySession(s, sessionPath));
+  const isSelected = selectedIds.includes(message.id);
   const [avatarFailed, setAvatarFailed] = useState(false);
 
   // Resolve agent identity from agentId prop; fall back to global values
@@ -50,23 +57,60 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
 
   const blocks = message.blocks || [];
 
-  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    const textBlocks = blocks.filter((b): b is ContentBlock & { type: 'text' } => b.type === 'text');
-    if (textBlocks.length === 0) return;
-    // eslint-disable-next-line no-restricted-syntax -- temp div for HTML-to-text extraction (clipboard)
-    const tmp = document.createElement('div');
-    tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
-    const text = tmp.innerText.trim();
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {}); // clipboard may reject without focus/permission — non-critical
-  }, [blocks]);
+    const state = useStore.getState();
+    const ids = selectSelectedIdsBySession(state, sessionPath);
+
+    if (ids.length > 0) {
+      const session = state.chatSessions[sessionPath];
+      if (!session) return;
+      const texts: string[] = [];
+      for (const item of session.items) {
+        if (item.type !== 'message') continue;
+        if (!ids.includes(item.data.id)) continue;
+        if (item.data.role === 'user') {
+          texts.push(item.data.text || '');
+        } else {
+          const textBlocks = (item.data.blocks || []).filter(
+            (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
+          );
+          if (textBlocks.length === 0) continue;
+          // eslint-disable-next-line no-restricted-syntax
+          const tmp = document.createElement('div');
+          tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
+          texts.push(tmp.innerText.trim());
+        }
+      }
+      navigator.clipboard.writeText(texts.join('\n\n')).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }).catch(() => {});
+    } else {
+      // single message copy (existing logic)
+      const textBlocks = blocks.filter(
+        (b): b is ContentBlock & { type: 'text' } => b.type === 'text'
+      );
+      if (textBlocks.length === 0) return;
+      // eslint-disable-next-line no-restricted-syntax
+      const tmp = document.createElement('div');
+      tmp.innerHTML = textBlocks.map(b => b.html).join('\n');
+      const text = tmp.innerText.trim();
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }).catch(() => {});
+    }
+  }, [blocks, sessionPath]);
+
+  const handleScreenshot = useCallback(async () => {
+    const fn = await lazyScreenshot();
+    fn(message.id, sessionPath);
+  }, [message.id, sessionPath]);
 
   return (
-    <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}`}>
+    <div className={`${styles.messageGroup} ${styles.messageGroupAssistant}${isSelected ? ` ${styles.messageGroupSelected}` : ''}`}
+         data-message-id={message.id}>
       {showAvatar && (
         <div className={styles.avatarRow}>
           {!avatarFailed ? (
@@ -97,17 +141,14 @@ export const AssistantMessage = memo(function AssistantMessage({ message, showAv
           <ContentBlockView key={`block-${i}`} block={block} agentName={displayName} yuan={displayYuan} />
         ))}
       </div>
-      <button className={`${styles.msgCopyBtn}${copied ? ` ${styles.msgCopyBtnCopied}` : ''}`} onClick={handleCopy} title={t('common.copyText')}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          {copied
-            ? <polyline points="20 6 9 17 4 12" />
-            : <>
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </>
-          }
-        </svg>
-      </button>
+      <MessageActions
+        messageId={message.id}
+        sessionPath={sessionPath}
+        onCopy={handleCopy}
+        onScreenshot={handleScreenshot}
+        copied={copied}
+        isStreaming={isStreaming}
+      />
     </div>
   );
 });
@@ -144,6 +185,8 @@ const ContentBlockView = memo(function ContentBlockView({ block, agentName, yuan
       return <CronConfirmCard confirmId={(block as any).confirmId} jobData={block.jobData} status={block.status} />;
     case 'settings_confirm':
       return <SettingsConfirmCard {...block} />;
+    case 'plugin_card':
+      return <PluginCardBlock card={(block as any).card} />;
     default:
       return null;
   }

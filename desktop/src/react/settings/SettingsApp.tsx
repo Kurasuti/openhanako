@@ -18,6 +18,8 @@ import { ProvidersTab } from './tabs/ProvidersTab';
 import { MediaTab } from './tabs/MediaTab';
 import { AboutTab } from './tabs/AboutTab';
 import { PluginsTab } from './tabs/PluginsTab';
+import { SecurityTab } from './tabs/SecurityTab';
+import { SharingTab } from './tabs/SharingTab';
 import { CropOverlay } from './overlays/CropOverlay';
 import { AgentCreateOverlay } from './overlays/AgentCreateOverlay';
 import { AgentDeleteOverlay } from './overlays/AgentDeleteOverlay';
@@ -40,7 +42,9 @@ const TAB_COMPONENTS: Record<string, React.ComponentType> = {
   bridge: BridgeTab,
   providers: ProvidersTab,
   media: MediaTab,
+  sharing: SharingTab,
   plugins: PluginsTab,
+  security: SecurityTab,
   about: AboutTab,
 };
 

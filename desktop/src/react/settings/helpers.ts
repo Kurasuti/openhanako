@@ -42,18 +42,16 @@ export function resolveProviderForModel(modelId: string): string | null {
 function lookupReferenceModelMeta(modelId: string): any {
   if (!modelId) return null;
   const dict = knownModels as Record<string, any>;
+  const bare = modelId.includes('/') ? modelId.split('/').pop()! : null;
 
-  if (dict[modelId]) {
-    return { ...dict[modelId], _source: 'reference' };
+  // 二级查找：遍历所有 provider，精确匹配 modelId 或 bare name
+  for (const [key, val] of Object.entries(dict)) {
+    if (key === '_comment' || typeof val !== 'object' || val === null) continue;
+    if (val[modelId]) return { ...val[modelId], _source: 'reference' };
+    if (bare && val[bare]) return { ...val[bare], _source: 'reference' };
   }
 
-  const lowerId = modelId.toLowerCase();
-  const candidates = Object.entries(dict)
-    .filter(([key]) => key !== '_comment' && lowerId.startsWith(key.toLowerCase()))
-    .sort((a, b) => b[0].length - a[0].length);
-
-  if (candidates.length === 0) return null;
-  return { ...candidates[0][1], _source: 'reference' };
+  return null;
 }
 
 export function lookupModelMeta(modelId: string): any {
@@ -169,7 +167,7 @@ export const PROVIDER_PRESETS = [
   { value: 'siliconflow', label: 'SiliconFlow', url: 'https://api.siliconflow.cn/v1', api: 'openai-completions' },
   { value: 'groq', label: 'Groq', url: 'https://api.groq.com/openai/v1', api: 'openai-completions' },
   { value: 'mistral', label: 'Mistral', url: 'https://api.mistral.ai/v1', api: 'openai-completions' },
-  { value: 'minimax', label: 'MiniMax', url: 'https://api.minimaxi.com/v1', api: 'openai-completions' },
+  { value: 'minimax', label: 'MiniMax', url: 'https://api.minimaxi.com/anthropic', api: 'anthropic-messages' },
   { value: 'openrouter', label: 'OpenRouter', url: 'https://openrouter.ai/api/v1', api: 'openai-completions' },
   { value: 'mimo', label: 'Xiaomi (MiMo)', url: 'https://api.xiaomimimo.com/v1', api: 'openai-completions' },
 ];

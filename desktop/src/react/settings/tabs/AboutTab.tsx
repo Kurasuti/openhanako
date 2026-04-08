@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useSettingsStore } from '../store';
 import { autoSaveConfig, t } from '../helpers';
 import { Toggle } from '../widgets/Toggle';
@@ -15,25 +15,6 @@ export function AboutTab() {
   const [licenseOpen, setLicenseOpen] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState<AutoUpdateState | null>(null);
   const isBeta = settingsConfig?.update_channel === 'beta';
-
-  // 全权模式 easter egg：点击头像 5 次解锁
-  const [devUnlocked, setDevUnlocked] = useState(false);
-  const tapCount = useRef(0);
-  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showFullAccessWarning, setShowFullAccessWarning] = useState(false);
-
-  const sandboxEnabled = settingsConfig?.sandbox !== false;
-
-  const handleIconTap = () => {
-    tapCount.current += 1;
-    if (tapTimer.current) clearTimeout(tapTimer.current);
-    if (tapCount.current >= 5) {
-      tapCount.current = 0;
-      setDevUnlocked(prev => !prev);
-    } else {
-      tapTimer.current = setTimeout(() => { tapCount.current = 0; }, 1500);
-    }
-  };
 
   useEffect(() => {
     hana?.getAppVersion?.().then((v: string) => setVersion(v || ''));
@@ -141,10 +122,9 @@ export function AboutTab() {
     <div className={`${styles['settings-tab-content']} ${styles['active']}`} data-tab="about">
       <div className={styles['about-hero']}>
         <img
-          className={`${styles['about-icon']} ${styles['about-icon-clickable']}`}
+          className={styles['about-icon']}
           src={iconUrl}
           alt="Hanako"
-          onClick={handleIconTap}
         />
         <div className={styles['about-name']}>Hanako</div>
         <div className={styles['about-tagline']}>{t('settings.about.tagline')}</div>
@@ -202,60 +182,6 @@ export function AboutTab() {
 
       {licenseOpen && (
         <pre className={styles['about-license-text']}>{LICENSE_TEXT}</pre>
-      )}
-
-      {devUnlocked && (
-        <section className={`${styles['settings-section']} ${styles['about-dev-section']}`}>
-          <h2 className={styles['settings-section-title']}>{t('settings.about.permissions')}</h2>
-          <div className={styles['tool-caps-group']}>
-            <div className={styles['tool-caps-item']}>
-              <div className={styles['tool-caps-label']}>
-                <span className={styles['tool-caps-name']}>{t('settings.about.fullAccess')}</span>
-                <span className={`${styles['tool-caps-desc']} ${styles['warn']}`}>
-                  {t('settings.about.fullAccessDesc')}
-                </span>
-              </div>
-              <Toggle
-                on={!sandboxEnabled}
-                onChange={async (on) => {
-                  if (on) {
-                    setShowFullAccessWarning(true);
-                  } else {
-                    await autoSaveConfig({ sandbox: true }, { silent: true });
-                    await loadSettingsConfig();
-                  }
-                }}
-              />
-            </div>
-          </div>
-        </section>
-      )}
-
-      {showFullAccessWarning && (
-        <div className="hana-warning-overlay" onClick={() => setShowFullAccessWarning(false)}>
-          <div className="hana-warning-box" onClick={(e) => e.stopPropagation()}>
-            <h3 className="hana-warning-title">{t('settings.about.fullAccessWarningTitle')}</h3>
-            <div className="hana-warning-body">
-              <p>{t('settings.about.fullAccessWarningBody1')}</p>
-              <p style={{ whiteSpace: 'pre-line' }}>
-                {t('settings.about.fullAccessWarningBody2')}
-              </p>
-              <p>{t('settings.about.fullAccessWarningBody3')}</p>
-            </div>
-            <div className="hana-warning-actions">
-              <button className="hana-warning-cancel" onClick={() => setShowFullAccessWarning(false)}>
-                {t('settings.about.fullAccessCancel')}
-              </button>
-              <button className="hana-warning-confirm" onClick={async () => {
-                setShowFullAccessWarning(false);
-                await autoSaveConfig({ sandbox: false }, { silent: true });
-                await loadSettingsConfig();
-              }}>
-                {t('settings.about.fullAccessConfirm')}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

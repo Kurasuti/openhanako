@@ -19,23 +19,46 @@ declare function t(key: string, vars?: Record<string, string | number>): string;
 
 // ── 拖拽附件 drop handler（从 bridge.ts appInput shim 迁移） ──
 
-async function handleDrop(e: React.DragEvent): Promise<void> {
-  const files = e.dataTransfer?.files;
-  if (!files || files.length === 0) return;
-
-  const store = useStore.getState();
-  if (store.attachedFiles.length >= 9) return;
-
-  let srcPaths: string[] = [];
-  const nameMap: Record<string, string> = {};
-  for (const file of Array.from(files)) {
-    const filePath = window.platform?.getFilePath?.(file);
-    if (filePath) {
-      srcPaths.push(filePath);
-      nameMap[filePath] = file.name;
-    }
+async function installSkillFile(filePath: string): Promise<void> {
+  try {
+    const res = await hanaFetch('/api/skills/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: filePath }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    useStore.getState().addToast(
+      t('settings.skills.installSuccess', { name: data.skill?.name || '' }),
+      'success',
+    );
+  } catch (err) {
+    useStore.getState().addToast(
+      t('settings.skills.installError') + ': ' + (err instanceof Error ? err.message : String(err)),
+      'error',
+    );
   }
+}
+
+/**
+ * attachFilesFromPaths — 将文件系统路径列表附加为聊天附件
+ *
+ * 拖拽和文件选择器共用此逻辑。nameMap 可选，用于保留拖拽时的原始文件名。
+ */
+export async function attachFilesFromPaths(
+  srcPaths: string[],
+  nameMap: Record<string, string> = {},
+): Promise<void> {
   if (srcPaths.length === 0) return;
+  if (useStore.getState().attachedFiles.length >= 9) return;
+
+  // .skill 文件直接安装为用户技能，不当附件处理
+  const skillPaths = srcPaths.filter(p => /\.skill$/i.test(p));
+  if (skillPaths.length) {
+    srcPaths = srcPaths.filter(p => !skillPaths.includes(p));
+    for (const p of skillPaths) installSkillFile(p);
+    if (srcPaths.length === 0) return;
+  }
 
   // Desk 文件直接附加（保留原始路径，不走 upload）
   const s = useStore.getState();
@@ -84,6 +107,22 @@ async function handleDrop(e: React.DragEvent): Promise<void> {
       });
     }
   }
+}
+
+async function handleDrop(e: React.DragEvent): Promise<void> {
+  const files = e.dataTransfer?.files;
+  if (!files || files.length === 0) return;
+
+  const nameMap: Record<string, string> = {};
+  const srcPaths: string[] = [];
+  for (const file of Array.from(files)) {
+    const filePath = window.platform?.getFilePath?.(file);
+    if (filePath) {
+      srcPaths.push(filePath);
+      nameMap[filePath] = file.name;
+    }
+  }
+  await attachFilesFromPaths(srcPaths, nameMap);
 }
 
 // ── DropText ──

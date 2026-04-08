@@ -5,7 +5,7 @@
  * 此文件只负责 titlebar + sidebar + 主区域 + overlays 的组装。
  */
 
-import { useEffect, lazy, Suspense } from 'react';
+import { useEffect, useRef, lazy, Suspense } from 'react';
 import { useStore } from './stores';
 import type { ActivePanel } from './types';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -17,12 +17,15 @@ import { BridgePanel } from './components/BridgePanel';
 const SkillViewerOverlay = lazy(() => import('./components/SkillViewerOverlay').then(m => ({ default: m.SkillViewerOverlay })));
 import { PreviewPanel } from './components/PreviewPanel';
 import { DeskSection } from './components/DeskSection';
+import { PluginPageView } from './components/plugin/PluginPageView';
+import { PluginWidgetView } from './components/plugin/PluginWidgetView';
 import { InputArea } from './components/InputArea';
 import { SessionList } from './components/SessionList';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ChatArea } from './components/chat/ChatArea';
 import { ChannelsPanel, ChannelMessages, ChannelMembers, ChannelInput, ChannelReadonly } from './components/ChannelsPanel';
 import { ChannelTabBar } from './components/channels/ChannelTabBar';
+import { WidgetButtons } from './components/plugin/WidgetButtons';
 import { ChannelListSidebar } from './components/channels/ChannelList';
 import { ChannelHeader } from './components/channels/ChannelHeader';
 import { ChannelCreateOverlay } from './components/channels/ChannelCreateOverlay';
@@ -33,6 +36,7 @@ import { createNewSession } from './stores/session-actions';
 import { toggleJianSidebar } from './stores/desk-actions';
 import { WindowControls } from './components/WindowControls';
 import { ToastContainer } from './components/ToastContainer';
+import { InputContextMenu } from './components/InputContextMenu';
 import { StatusBar } from './components/StatusBar';
 import { initTheme, initDragPrevention } from './bootstrap';
 import { initApp } from './app-init';
@@ -173,6 +177,8 @@ function App() {
   const currentSessionPath = useStore(s => s.currentSessionPath);
   const currentAgentId = useStore(s => s.currentAgentId);
   const currentChannel = useStore(s => s.currentChannel);
+  const jianView = useStore(s => s.jianView);
+  const isPluginTab = typeof currentTab === 'string' && currentTab.startsWith('plugin:');
   const hasPanels = !welcomeVisible && !!currentSessionPath;
   const { floatCard, show: showFloat, scheduleHide: scheduleFloatHide, cancelHide: cancelFloatHide, hide: hideFloat } = useFloatCard();
 
@@ -181,6 +187,21 @@ function App() {
       console.error('[init] 初始化异常:', err);
       window.platform?.appReady?.();
     });
+  }, []);
+
+  // 测量 input-area 高度，写入 CSS 变量供 sessionPanel 约束滚动区域
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = inputAreaRef.current;
+    if (!el) return;
+    const parent = el.closest('.main-content') as HTMLElement | null;
+    if (!parent) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const h = entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight;
+      parent.style.setProperty('--input-area-h', `${h}px`);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   return (
@@ -205,26 +226,29 @@ function App() {
           </svg>
         </button>
         <ChannelTabBar />
-        <button
-          className={`tb-toggle tb-toggle-right${jianOpen ? ' active' : ''}`}
-          id="tbToggleRight"
-          title={currentTab === 'channels' ? t('channel.info') : t('sidebar.jian')}
-          onClick={() => { hideFloat(); toggleJianSidebar(); }}
-          onMouseEnter={(e) => showFloat('right', e.currentTarget)}
-          onMouseLeave={scheduleFloatHide}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="15" y1="3" x2="15" y2="21"></line>
-          </svg>
-        </button>
+        <div className="tb-right-group">
+          <WidgetButtons />
+          <button
+              className={`tb-toggle tb-toggle-right${jianOpen ? ' active' : ''}`}
+              id="tbToggleRight"
+              title={currentTab === 'channels' ? t('channel.info') : t('sidebar.jian')}
+              onClick={() => { hideFloat(); toggleJianSidebar(); }}
+              onMouseEnter={(e) => showFloat('right', e.currentTarget)}
+              onMouseLeave={scheduleFloatHide}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="15" y1="3" x2="15" y2="21"></line>
+              </svg>
+            </button>
+        </div>
         <WindowControls />
       </div>
 
       {/* ── App body ── */}
       <div className="app">
         {/* Left sidebar */}
-        <aside className={`sidebar${sidebarOpen ? '' : ' collapsed'}`} id="sidebar">
+        <aside className={`sidebar${sidebarOpen && !isPluginTab ? '' : ' collapsed'}`} id="sidebar">
           <div className="sidebar-inner">
             <div className={`sidebar-chat-content${currentTab === 'chat' ? '' : ' hidden'}`}>
               <div className="sidebar-header">
@@ -304,7 +328,7 @@ function App() {
             </RegionalErrorBoundary>
           </div>
 
-          <div className={`input-area${currentTab === 'chat' ? '' : ' hidden'}`}>
+          <div ref={inputAreaRef} className={`input-area${currentTab === 'chat' ? '' : ' hidden'}`}>
             <RegionalErrorBoundary region="input" resetKeys={[currentSessionPath]}>
               <InputArea key={currentSessionPath || '__new'} />
             </RegionalErrorBoundary>
@@ -326,6 +350,12 @@ function App() {
             )}
           </div>
 
+          {isPluginTab && (
+            <div style={{ flex: 1, display: 'flex' }}>
+              <PluginPageView pluginId={currentTab.slice(7)} />
+            </div>
+          )}
+
           {/* Floating panels render into main-content */}
           <ActivityPanel />
           <AutomationPanel />
@@ -338,10 +368,18 @@ function App() {
         <aside className={`jian-sidebar${jianOpen ? '' : ' collapsed'}`} id="jianSidebar">
           <div className="resize-handle resize-handle-left" id="jianResizeHandle"></div>
           <div className="jian-sidebar-inner">
-            <div className={`jian-chat-content${currentTab === 'chat' ? '' : ' hidden'}`}>
-              <RegionalErrorBoundary region="desk">
-                <DeskSection />
-              </RegionalErrorBoundary>
+            <div className={`jian-chat-content${currentTab === 'chat' || isPluginTab ? '' : ' hidden'}`}>
+              {jianView === 'desk' ? (
+                <RegionalErrorBoundary region="desk">
+                  <DeskSection />
+                </RegionalErrorBoundary>
+              ) : jianView.startsWith('widget:') ? (
+                <PluginWidgetView pluginId={jianView.slice(7)} />
+              ) : (
+                <RegionalErrorBoundary region="desk">
+                  <DeskSection />
+                </RegionalErrorBoundary>
+              )}
             </div>
 
             <div className={`jian-channel-content${currentTab === 'channels' ? '' : ' hidden'}`}>
@@ -372,6 +410,9 @@ function App() {
 
       {/* Connection status bar */}
       <StatusBar />
+
+      {/* Input context menu (cut/copy/paste) */}
+      <InputContextMenu />
 
       {/* Toast notifications */}
       <ToastContainer />

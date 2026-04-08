@@ -47,9 +47,12 @@ import { createDiaryRoute } from "./routes/diary.js";
 import { createConfirmRoute } from "./routes/confirm.js";
 import { createAcpxRoute } from "./routes/acpx.js";
 import { createPluginsRoute } from "./routes/plugins.js";
+import { createCheckpointsRoute } from "./routes/checkpoints.js";
 // internal-browser WS is handled directly via raw ws.WebSocketServer in the
 // upgrade handler below (WsTransport needs raw ws .on()/.off() methods)
 import { ConfirmStore } from "../lib/confirm-store.js";
+import { DeferredResultStore } from "../lib/deferred-result-store.js";
+import { createDeferredResultExtension } from "../lib/extensions/deferred-result-ext.js";
 import { BridgeManager } from "../lib/bridge/bridge-manager.js";
 import { Hub } from "../hub/index.js";
 import { startCLI } from "./cli.js";
@@ -119,6 +122,10 @@ await engine.initPlugins(hub.eventBus);
 // 启动 Hub 调度器（Scheduler + ChannelRouter）
 hub.initSchedulers();
 
+engine.cleanupCheckpoints().catch(err => {
+  console.warn("[checkpoint] startup cleanup failed:", err.message);
+});
+
 // 加载 i18n
 loadLocale(engine.config?.locale);
 
@@ -167,6 +174,45 @@ app.onError((err, c) => {
 const confirmStore = new ConfirmStore();
 engine.setConfirmStore(confirmStore);
 
+// --- Deferred Result Store ---
+const deferredResultStore = new DeferredResultStore(
+  hub.eventBus,
+  path.join(hanakoHome, ".ephemeral", "deferred-tasks.json"),
+);
+engine.setDeferredResultStore(deferredResultStore);
+
+// Bus handlers for plugin access
+hub.eventBus.handle("deferred:register", ({ taskId, sessionPath, meta }) => {
+  const sp = sessionPath || engine.currentSessionPath;
+  if (!sp) return { ok: false, error: "no active session" };
+  deferredResultStore.defer(taskId, sp, meta);
+  return { ok: true, sessionPath: sp };
+});
+hub.eventBus.handle("deferred:resolve", ({ taskId, result }) => {
+  deferredResultStore.resolve(taskId, result);
+  return { ok: true };
+});
+hub.eventBus.handle("deferred:fail", ({ taskId, reason }) => {
+  deferredResultStore.fail(taskId, reason);
+  return { ok: true };
+});
+hub.eventBus.handle("deferred:query", ({ taskId }) => {
+  return deferredResultStore.query(taskId);
+});
+hub.eventBus.handle("deferred:list-pending", ({ sessionPath }) => {
+  return deferredResultStore.listPending(sessionPath);
+});
+hub.eventBus.handle("session:get-titles", async ({ paths }) => {
+  if (!Array.isArray(paths) || !paths.length) return { titles: {} };
+  const coord = engine._sessionCoord;
+  if (!coord?.getTitlesForPaths) return { titles: {} };
+  const titles = await coord.getTitlesForPaths(paths);
+  return { titles };
+});
+
+// Register Pi SDK extension factory
+engine.registerExtensionFactory(createDeferredResultExtension(deferredResultStore));
+
 // ── 外部平台接入管理器 ──
 const bridgeManager = new BridgeManager({ engine, hub });
 hub.bridgeManager = bridgeManager;
@@ -193,6 +239,7 @@ app.route("/api", createDiaryRoute(engine));
 app.route("/api", createConfirmRoute(confirmStore, engine));
 app.route("/api", createAcpxRoute(engine));
 app.route("/api", createPluginsRoute(engine));
+app.route("/api", createCheckpointsRoute(engine));
 // internal-browser WS — see unified upgrade handler in server startup below
 
 // 健康检查 + 身份信息
@@ -334,7 +381,7 @@ try {
   // 写 server-info 文件，供 Electron 检测复用或外部工具查询
   const serverInfoPath = path.join(hanakoHome, "server-info.json");
   try {
-    fs.writeFileSync(serverInfoPath, JSON.stringify({ pid: process.pid, port: actualPort, token: SERVER_TOKEN }));
+    fs.writeFileSync(serverInfoPath, JSON.stringify({ pid: process.pid, port: actualPort, token: SERVER_TOKEN, version: appVersion }));
   } catch (e) {
     console.error("[server] 写入 server-info.json 失败:", e.message);
   }

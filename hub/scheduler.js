@@ -85,12 +85,13 @@ export class Scheduler {
     this._heartbeat = createHeartbeat({
       getDeskFiles: () => engine.listDeskFiles(),
       getWorkspacePath: () => engine.homeCwd,
+      getAgentName: () => engine.agentName,
       registryPath: path.join(agent.deskDir, "jian-registry.json"),
       overwatchPath: path.join(agent.deskDir, "overwatch.md"),
-      onBeat: (prompt) => this._executeActivity(prompt, "heartbeat"),
+      onBeat: (prompt) => this._executeActivity(prompt, "heartbeat", null, { withMemory: true }),
       onJianBeat: (prompt, cwd) => {
         const isZh = getLocale().startsWith("zh");
-        this._executeActivity(prompt, "heartbeat", `${isZh ? "笺" : "jian"}:${path.basename(cwd)}`, { cwd });
+        this._executeActivity(prompt, "heartbeat", `${isZh ? "笺" : "jian"}:${path.basename(cwd)}`, { cwd, withMemory: true });
       },
       intervalMinutes: hbInterval,
       emitDevLog: (text, level) => engine.emitDevLog(text, level),

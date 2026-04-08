@@ -42,10 +42,6 @@ function agentDir(engine, id) {
   return path.join(engine.agentsDir, id);
 }
 
-function isActiveAgent(engine, id) {
-  return id === engine.currentAgentId;
-}
-
 // 本地应用，API key 不做掩码，前端用 type="password" 控制显隐
 
 export function createAgentsRoute(engine) {
@@ -334,10 +330,8 @@ export function createAgentsRoute(engine) {
       const configPath = path.join(agentDir(engine, id), "config.yaml");
       saveConfig(configPath, agentPartial);
       engine.invalidateAgentListCache();
-      // active agent 需要额外触发模块刷新 + prompt 重建
-      if (isActiveAgent(engine, id)) {
-        await engine.updateConfig(agentPartial);
-      }
+      // 触发目标 agent 模块刷新 + prompt 重建
+      await engine.updateConfig(agentPartial, { agentId: id });
       // 记忆总开关：无论是否 active agent，都需要刷新运行时状态（因为 ticker 后台在跑）
       if (agentPartial.memory && "enabled" in agentPartial.memory) {
         engine.setMemoryMasterEnabled(id, agentPartial.memory.enabled !== false);
@@ -379,7 +373,7 @@ export function createAgentsRoute(engine) {
       }
       await fs.writeFile(path.join(agentDir(engine, id), "identity.md"), content, "utf-8");
       engine.invalidateAgentListCache();
-      if (isActiveAgent(engine, id)) await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: id });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -416,7 +410,7 @@ export function createAgentsRoute(engine) {
         return c.json({ error: "content must be a string" }, 400);
       }
       await fs.writeFile(path.join(agentDir(engine, id), "ishiki.md"), content, "utf-8");
-      if (isActiveAgent(engine, id)) await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: id });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -453,7 +447,7 @@ export function createAgentsRoute(engine) {
         return c.json({ error: "content must be a string" }, 400);
       }
       await fs.writeFile(path.join(agentDir(engine, id), "public-ishiki.md"), content, "utf-8");
-      if (isActiveAgent(engine, id)) await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: id });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -501,7 +495,7 @@ export function createAgentsRoute(engine) {
         .join("\n")
         + "\n";
       await fs.writeFile(path.join(agentDir(engine, id), "pinned.md"), content, "utf-8");
-      if (isActiveAgent(engine, id)) await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: id });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);
@@ -594,7 +588,7 @@ export function createAgentsRoute(engine) {
       // 重建索引
       rebuildIndex(expDir, indexPath);
 
-      if (isActiveAgent(engine, id)) await engine.updateConfig({});
+      await engine.updateConfig({}, { agentId: id });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: err.message }, 500);

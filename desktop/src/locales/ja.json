@@ -2,6 +2,7 @@
   "channel": {
     "tab": "チャンネル",
     "chatTab": "チャット",
+    "moreTabs": "その他のタブ",
     "empty": "チャンネルはまだありません ✿",
     "dmLabel": "メッセージ",
     "dmHint": "プライマリエージェントのみ",
@@ -79,7 +80,12 @@
     "me": "自分",
     "more": "もっと見る",
     "empty": "空",
-    "edit": "編集"
+    "edit": "編集",
+    "screenshot": "スクリーンショット",
+    "selectMessage": "メッセージを選択",
+    "screenshotSaved": "スクリーンショットを保存しました",
+    "screenshotFailed": "スクリーンショットの保存に失敗しました",
+    "selectedCount": "{count} 件選択中"
   },
   "chat": {
     "send": "送信",
@@ -116,6 +122,7 @@
     "planMode": "コンピュータを使う",
     "deskContext": "デスクのコンテキスト付き",
     "pastedImage": "貼り付け画像",
+    "attachFiles": "ファイルを追加",
     "docContext": "ドキュメント付き",
     "thinkingLevel": {
       "off": "オフ",
@@ -406,6 +413,56 @@
       "done": "🌐 {name} ブラウザ操作おわり",
       "failed": "🌐 {name} ブラウザが言うことを聞かない"
     },
+    "subagent": {
+      "running": "🧭 {name} 分身が調査中",
+      "done": "🧭 分身を送り出した",
+      "failed": "🧭 分身がトラブった"
+    },
+    "ask_agent": {
+      "running": "💬 {name} が相談中",
+      "done": "💬 質問を送った",
+      "failed": "💬 返事がない"
+    },
+    "check_pending_tasks": {
+      "running": "📋 {name} はやり残しを探している",
+      "done": "📋 {name} 確認おわり",
+      "failed": "📋 確認できなかった"
+    },
+    "cron": {
+      "running": "⏰ {name} はタイマーをセット中",
+      "done": "⏰ セット完了",
+      "failed": "⏰ セットできなかった"
+    },
+    "notify": {
+      "running": "🔔 {name} は通知を送っている",
+      "done": "🔔 通知おくった",
+      "failed": "🔔 通知が送れなかった"
+    },
+    "artifact": {
+      "running": "🖼️ {name} はお絵描き中",
+      "done": "🖼️ できた",
+      "failed": "🖼️ 崩れちゃった"
+    },
+    "dm": {
+      "running": "✉️ {name} はスマホを手に取った",
+      "done": "✉️ 送信した",
+      "failed": "✉️ 送れなかった"
+    },
+    "channel": {
+      "running": "📢 {name} はチャンネルに投稿中",
+      "done": "📢 投稿した",
+      "failed": "📢 投稿できなかった"
+    },
+    "install_skill": {
+      "running": "📥 {name} はスキルをインストール中",
+      "done": "📥 インストール完了",
+      "failed": "📥 インストールできなかった"
+    },
+    "update_settings": {
+      "running": "⚙️ {name} は設定を変更中",
+      "done": "⚙️ 変更した",
+      "failed": "⚙️ 変更できなかった"
+    },
     "_fallback": {
       "running": "🔧 {name} は作業中…",
       "done": "🔧 {name} 終わった",
@@ -453,8 +510,10 @@
       "work": "ワーク",
       "skills": "スキル",
       "bridge": "ソーシャル",
+      "sharing": "共有",
       "plugins": "プラグイン",
-      "about": "概要"
+      "about": "概要",
+      "security": "セキュリティ"
     },
     "appearance": {
       "title": "外観",
@@ -532,15 +591,6 @@
       "license": "ライセンス",
       "copyright": "著作権",
       "licenseToggle": "ライセンス全文",
-      "permissions": "権限",
-      "fullAccess": "フルアクセスモード",
-      "fullAccessDesc": "サンドボックス隔離とコマンド制限を無効にします。エージェントがファイルシステムとターミナルに完全にアクセスできるようになります（新しいセッションから有効）",
-      "fullAccessWarningTitle": "フルアクセスモードについて",
-      "fullAccessWarningBody1": "有効にすると、エージェントに完全なシステム権限が付与されます：",
-      "fullAccessWarningBody2": "1. ファイルシステムのサンドボックスが解除され、すべてのパスに読み書き可能\n2. ターミナルコマンドが無制限になり、sudo、chmod 等を実行可能\n3. OS レベルの隔離（macOS Seatbelt / Linux bubblewrap）が無効化",
-      "fullAccessWarningBody3": "エージェントの動作を完全に信頼し、システムレベルの操作が必要な場合のみ推奨します。",
-      "fullAccessCancel": "キャンセル",
-      "fullAccessConfirm": "リスクを理解した上で有効にする",
       "updateAvailable": "新しいバージョンがあります：v{version}",
       "updateDownload": "ダウンロード",
       "updateChecking": "アップデートを確認中…",
@@ -554,6 +604,24 @@
       "updateNeedInstall": "先に Hanako をアプリケーションフォルダに移動してください",
       "updateDiskSpace": "ディスク容量不足のため、アップデートをダウンロードできません",
       "betaUpdates": "ベータ版アップデートを受け取る"
+    },
+    "security": {
+      "sandbox": "サンドボックス",
+      "sandboxDesc": "AIのファイルシステムアクセスをワークスペースと必要なデータフォルダに制限します",
+      "sandboxWarning": "サンドボックスを無効にすると、AIがシステム上の任意のファイルにアクセスできるようになり、予期しない結果を招く可能性があります",
+      "fileBackup": "ファイルバックアップ",
+      "fileBackupDesc": "AIがファイルを変更・削除する前に元の内容を自動保存します",
+      "retention": "保持期間",
+      "retention1d": "1日",
+      "retention3d": "3日",
+      "retention7d": "7日",
+      "maxFileSize": "次のサイズ以上を無視",
+      "viewBackups": "バックアップを表示",
+      "hideBackups": "閉じる",
+      "restoreBtn": "復元",
+      "noBackups": "バックアップはまだありません",
+      "restoreSuccess": "復元しました",
+      "restoreFailed": "復元に失敗しました"
     },
     "me": {
       "title": "自分",
@@ -849,6 +917,16 @@
       "pluginsDir": "プラグインディレクトリ：{path}",
       "needsFullAccess": "このプラグインを使用するには「フルアクセスプラグインを許可」を有効にしてください"
     },
+    "screenshot": {
+      "title": "スクリーンショット共有",
+      "color": "カラー",
+      "width": "幅",
+      "light": "ライト",
+      "dark": "ダーク",
+      "sakura": "青空と桜",
+      "mobile": "モバイル",
+      "desktop": "デスクトップ"
+    },
     "bridge": {
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
@@ -983,7 +1061,8 @@
     "cronDone": "スケジュールタスク完了",
     "error": "実行エラー",
     "viewSession": "セッションを表示 →",
-    "duration": "{text} かかりました"
+    "duration": "{text} かかりました",
+    "promote": "チャットに昇格"
   },
   "automation": {
     "title": "スケジュールタスク",
@@ -991,6 +1070,12 @@
     "defaultModel": "デフォルトモデル",
     "edit": "編集",
     "delete": "削除"
+  },
+  "ctx": {
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "selectAll": "すべて選択"
   },
   "desk": {
     "title": "デスク",
@@ -1004,6 +1089,8 @@
     "openInFinder": "フォルダを開く",
     "jianLabel": "Jian",
     "jianPlaceholder": "このフォルダのファイルの扱い方をアシスタントに伝えましょう...",
+    "execLogLabel": "実行記録",
+    "execLogDelete": "この記録を削除",
     "emptyTitle": "デスクは空です",
     "emptyHint": "デスクはアシスタントの巡回ワークスペースであり、各チャットのデフォルトディレクトリです。\n設定でフォルダを指定してください。",
     "goToSettings": "設定へ",
@@ -1057,7 +1144,7 @@
     "empty": "メッセージなし",
     "notConfigured": "{platform} は設定されていません",
     "goToSettings": "設定へ",
-    "resetContext": "コンテキストをクリア",
+    "resetContext": "コンテキストをリセット",
     "resetContextTip": "次のメッセージから新しい会話が始まります"
   },
   "error": {
@@ -1160,7 +1247,7 @@
     "agentNoReply": "（{name} は返信しませんでした）",
     "agentCallFailed": "{name} の呼び出しに失敗しました: {msg}",
     "cronNoJobs": "スケジュールタスクはありません",
-    "cronAddNeedParams": "エラー：add には type, schedule, prompt パラメータが必要です",
+    "cronAddNeedParams": "エラー：add には scheduleType, schedule, prompt パラメータが必要です",
     "cronEveryMustBeNumber": "エラー：every タイプの schedule は正の整数（ミリ秒）である必要があります",
     "cronCreated": "スケジュールタスクを作成しました: {label} ({id})",
     "cronConfirmed": "ユーザーが確認しました。スケジュールタスクを作成しました: {label} ({id})",
@@ -1211,7 +1298,11 @@
     "settingsTimeout": "「{label}」の変更確認がタイムアウトしました。設定は変更されていません",
     "subagentMaxConcurrent": "現在 {max} 個のサブエージェントが実行中です。完了をお待ちください。",
     "subagentFailed": "サブエージェントの実行に失敗しました: {msg}",
+    "subagentTimeout": "サブエージェントがタイムアウトしました（{minutes}分）",
+    "askAgentTimeout": "{name} がタイムアウトしました（{minutes}分）",
     "subagentNoOutput": "(サブエージェントは出力を生成しませんでした)",
+    "subagentDispatched": "サブタスクを送信しました (task-id: {taskId})。完了後、結果は自動的に届きます。",
+    "askAgentDispatched": "{name} にリクエストを送信しました (task-id: {taskId})。返信は自動的に届きます。",
     "installSkillDisabled": "自己学習スキル機能が有効になっていません。設定で「Agent のスキル作成/インストールを許可」を有効にしてください。",
     "installSkillGithubDisabled": "GitHub スキル取得が有効になっていません。設定で「GitHub からのスキル取得を許可」を有効にしてください。",
     "installSkillInvalidGithubUrl": "無効な GitHub URL：{url}",
@@ -1414,7 +1505,7 @@
     },
     "askAgent": {
       "label": "Agent 間呼び出し",
-      "description": "別の agent にタスクを割り当て、即座に結果を取得します。相手はその場で処理して返答し、その結果をユーザーに伝えることができます。\n適している場面：相手にコードレビュー、翻訳、専門的な視点からの分析など、即座のフィードバックが必要なタスク。\n相手は独自のペルソナとモデルで返答し、読み取り専用ツール（ファイル読み取り、検索、web fetch）を持ち、ファイル書き込みや他の agent の呼び出しはできません。\nヒント：どの agent を呼ぶか迷った場合、agent=\"?\" で全 agent の能力とモデルを確認できます。",
+      "description": "別の agent にタスクを割り当てます。タスクはバックグラウンドで実行され、相手の返答は自動的に現在の会話に届きます。\n\nあなたの判断：\n- 並行して進められる作業があれば、続けてください\n- 返答がないと次に進めない場合は、ユーザーにリクエスト送信済みで返信待ちであることを伝え、そのまま待ってください\n\n適している場面：相手にコードレビュー、翻訳、専門的な視点からの分析など。\n相手は独自のペルソナとモデルで返答し、読み取り専用ツール（ファイル読み取り、検索、web fetch）を持ち、ファイル書き込みや他の agent の呼び出しはできません。\nヒント：どの agent を呼ぶか迷った場合、agent=\"?\" で全 agent の能力とモデルを確認できます。",
       "agentDesc": "対象 agent の ID。\"?\" で全 agent を一覧表示。",
       "taskDesc": "タスクの説明（相手に見える完全なプロンプト）"
     },
@@ -1426,9 +1517,9 @@
     },
     "cron": {
       "label": "スケジュールタスク",
-      "description": "スケジュールタスクを作成・管理します。スケジュールタスクはバックグラウンドで自動実行され、指定時刻に独立した session を起動して prompt を実行します。\n操作：\n- list：全タスクを表示\n- add(type, schedule, prompt, label?, model?)：タスクを作成\n  - type \"at\"：一回限り、schedule は ISO 時間文字列\n  - type \"every\"：間隔、schedule はミリ秒数（例：3600000 = 1 時間）\n  - type \"cron\"：cron 式（例：\"0 7 * * *\" = 毎朝 7 時）\n  - model：オプション、タスク実行に使うモデルを指定（未指定の場合はチャットモデルを使用）\n- remove(id)：タスクを削除\n- toggle(id)：タスクの有効/無効を切り替え",
+      "description": "スケジュールタスクを作成・管理します。スケジュールタスクはバックグラウンドで自動実行され、指定時刻に独立した session を起動して prompt を実行します。\n操作：\n- list：全タスクを表示\n- add(scheduleType, schedule, prompt, label?, model?)：タスクを作成\n  - scheduleType \"at\"：一回限り、schedule は ISO 時間文字列\n  - scheduleType \"every\"：間隔、schedule は分数（例：60 = 毎時）\n  - scheduleType \"cron\"：cron 式（例：\"0 7 * * *\" = 毎朝 7 時）\n  - model：オプション、タスク実行に使うモデルを指定（未指定の場合はチャットモデルを使用）\n- remove(id)：タスクを削除\n- toggle(id)：タスクの有効/無効を切り替え",
       "actionDesc": "操作タイプ",
-      "typeDesc": "スケジュールタイプ（add の場合必須）",
+      "scheduleTypeDesc": "スケジュールタイプ（add の場合必須）",
       "scheduleDesc": "スケジュール: ISO時刻(at)、分数(every、例:60=毎時)、cron式(cron)",
       "promptDesc": "指定時刻に実行する prompt（add の場合必須）",
       "labelDesc": "タスクの表示ラベル（オプション）",
@@ -1474,7 +1565,7 @@
     },
     "subagent": {
       "label": "サブエージェントを起動",
-      "description": "サブエージェントを起動し、隔離されたコンテキストで独立タスクを処理します。サブエージェントはバックグラウンドで独自のコンテキストウィンドウを持ち、最終結果のみを返し、現在の会話のコンテキストを消費しません。\n適している場面：\n- 大量の検索・読解の後に簡潔な結論にまとめる調査タスク\n- 現在の作業と並行できる独立したサブ問題\n- 複数の方向を同時に探索する必要があるタスク（複数の subagent を同時に呼び出せます）\n適さない場面：ファイル変更やコマンド実行など副作用のある操作\n\n重要：task パラメータには完全な指示と必要な背景情報を含めてください。サブエージェントは現在の会話履歴を参照できません。",
+      "description": "サブエージェントを起動し、隔離されたコンテキストで独立タスクを処理します。タスクはバックグラウンドで実行され、完了後に結果が自動的に現在の会話に届きます。\n\nあなたの判断：\n- 並行して進められる作業があれば、続けてください\n- 結果がないと次に進めない場合は、ユーザーにタスクを送信済みで返信待ちであることを伝え、そのまま待ってください\n\n適している場面：\n- 大量の検索・読解の後に簡潔な結論にまとめる調査タスク\n- 現在の作業と並行できる独立したサブ問題\n- 複数の方向を同時に探索する必要があるタスク（複数の subagent を同時に呼び出せます）\n適さない場面：ファイル変更やコマンド実行など副作用のある操作\n\n重要：task パラメータには完全な指示と必要な背景情報を含めてください。サブエージェントは現在の会話履歴を参照できません。",
       "taskDesc": "サブエージェントへの完全な指示、必要な背景情報を含む",
       "modelDesc": "モデルを指定（オプション、デフォルトは utility モデル）"
     },
@@ -1484,7 +1575,8 @@
       "githubUrlDesc": "GitHub リポジトリ URL（モード A）",
       "skillContentDesc": "SKILL.md の完全な内容（モード B）",
       "skillNameDesc": "スキル名（モード B の場合必須）",
-      "reasonDesc": "このスキルが必要な理由の説明（監査用、必須）"
+      "reasonDesc": "このスキルが必要な理由の説明（監査用、必須）",
+      "userRequestedDesc": "ユーザーが明示的にインストールを要求したか（true = ユーザースキル、false = 学習スキル）"
     },
     "updateSettings": {
       "label": "設定",
@@ -1511,7 +1603,9 @@
       "workingDir": "作業ディレクトリ",
       "workingDirDesc": "Agent のファイルシステム作業ディレクトリ",
       "theme": "テーマ",
-      "chatModel": "チャットモデル"
+      "chatModel": "チャットモデル",
+      "fileBackup": "ファイルバックアップ",
+      "fileBackupDesc": "AI変更前にファイルを自動バックアップ"
     }
   },
   "cli": {

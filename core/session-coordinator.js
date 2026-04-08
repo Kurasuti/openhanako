@@ -8,7 +8,8 @@
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
-import { createAgentSession, SessionManager, SettingsManager } from "../lib/pi-sdk/index.js";
+import { createAgentSession, SessionManager } from "../lib/pi-sdk/index.js";
+import { createDefaultSettings } from "./session-defaults.js";
 import { createModuleLogger } from "../lib/debug-log.js";
 import { BrowserManager } from "../lib/browser/browser-manager.js";
 import { t, getLocale } from "../server/i18n.js";
@@ -17,14 +18,8 @@ import { findModel } from "../shared/model-ref.js";
 
 const log = createModuleLogger("session");
 
-/** 巡检/定时任务默认工具白名单 */
-export const PATROL_TOOLS_DEFAULT = [
-  "search_memory", "pin_memory", "unpin_memory",
-  "recall_experience", "record_experience",
-  "web_search", "web_fetch",
-  "todo", "notify",
-  "stage_files",
-];
+/** 巡检/定时任务默认工具白名单（"*" = 与 chat 一致，全部放行） */
+export const PATROL_TOOLS_DEFAULT = "*";
 
 function getSteerPrefix() {
   const isZh = getLocale().startsWith("zh");
@@ -58,7 +53,7 @@ export class SessionCoordinator {
     this._session = null;
     this._sessionStarted = false;
     this._sessions = new Map();
-    this._headlessRefCount = 0;
+    this._headlessOps = new Set();
     this._titlesCache = new Map(); // sessionDir → { titles, ts }
     this._metaCache = new Map();   // metaPath → { data, ts }
     this._pendingPlanMode = false;
@@ -79,16 +74,17 @@ export class SessionCoordinator {
 
   // ── Session 创建 / 切换 ──
 
-  async createSession(sessionMgr, cwd, memoryEnabled = true, model = null) {
+  async createSession(sessionMgr, cwd, memoryEnabled = true, model = null, { restore = false } = {}) {
     const t0 = Date.now();
     const effectiveCwd = cwd || this._d.getHomeCwd() || process.cwd();
     const agent = this._d.getAgent();
     const models = this._d.getModels();
-    const effectiveModel = model || this._pendingModel || models.currentModel;
+    // restore 模式：不指定 model，让 PI SDK 从 JSONL 恢复（session model 单一数据源）
+    const effectiveModel = restore ? null : (model || this._pendingModel || models.currentModel);
     this._pendingModel = null;
-    log.log(`createSession cwd=${effectiveCwd} (传入: ${cwd || "未指定"})`);
+    log.log(`createSession cwd=${effectiveCwd} restore=${restore} (传入: ${cwd || "未指定"})`);
 
-    if (!effectiveModel) {
+    if (!restore && !effectiveModel) {
       throw new Error(t("error.noAvailableModel"));
     }
 
@@ -96,44 +92,73 @@ export class SessionCoordinator {
       sessionMgr = SessionManager.create(effectiveCwd, agent.sessionDir);
     }
 
-    // 必须在 createAgentSession 前切换 session 级记忆状态，
-    // 否则首轮 prompt 会沿用上一个 session 的 system prompt。
+    // 切换 session 级记忆状态后立即快照 prompt（下方 promptSnapshot）。
     const creatingAgent = agent;
     creatingAgent.setMemoryEnabled(memoryEnabled);
 
     const baseResourceLoader = this._d.getResourceLoader();
-    const sessionEntry = {}; // populated after session creation; resourceLoader proxy references this
+    const initialPlanMode = this._pendingPlanMode;
+    this._pendingPlanMode = false;
+    const sessionEntry = { planMode: initialPlanMode }; // pre-populated for resourceLoader proxy
 
-    // Wrap resourceLoader to dynamically inject plan mode context into system prompt
+    // 快照当前 system prompt，per-session 隔离。
+    // 后续记忆编译、技能变更只影响新对话，已有对话的 prompt 不变（保护 prefix cache）。
+    const promptSnapshot = agent.buildSystemPrompt();
+
+    // Wrap resourceLoader: per-session prompt snapshot + plan mode injection
     const resourceLoader = Object.create(baseResourceLoader, {
+      getSystemPrompt: {
+        value: () => promptSnapshot,
+      },
       getAppendSystemPrompt: {
         value: () => {
           const base = baseResourceLoader.getAppendSystemPrompt();
-          if (!sessionEntry.planMode) return base;
-          const isZh = String(this._d.getAgent().config?.locale || "").startsWith("zh");
-          const planModePrompt = isZh
-            ? "【系统通知】当前处于「只读模式」，用户在设置中关闭了「操作电脑」权限。你只能使用只读工具（read、grep、find、ls）和自定义工具。不能执行写入、编辑、删除等操作。如果用户要求你做这些操作，请告知当前处于只读模式，需要先在输入框旁的按钮开启「操作电脑」权限。"
-            : "[System Notice] Currently in READ-ONLY MODE. The user has disabled 'Computer Access' in settings. You can only use read-only tools (read, grep, find, ls) and custom tools. You cannot write, edit, or delete. If the user asks for these operations, inform them that read-only mode is active and they need to enable 'Computer Access' via the button next to the input area.";
-          return [...base, planModePrompt];
+          const parts = [...base];
+
+          // Plan mode prompt (existing logic, preserved verbatim)
+          if (sessionEntry.planMode) {
+            const isZh = String(this._d.getAgent().config?.locale || "").startsWith("zh");
+            const planModePrompt = isZh
+              ? "【系统通知】当前处于「只读模式」，用户在设置中关闭了「操作电脑」权限。你只能使用只读工具（read、grep、find、ls）和自定义工具。不能执行写入、编辑、删除等操作。如果用户要求你做这些操作，请告知当前处于只读模式，需要先在输入框旁的按钮开启「操作电脑」权限。"
+              : "[System Notice] Currently in READ-ONLY MODE. The user has disabled 'Computer Access' in settings. You can only use read-only tools (read, grep, find, ls) and custom tools. You cannot write, edit, or delete. If the user asks for these operations, inform them that read-only mode is active and they need to enable 'Computer Access' via the button next to the input area.";
+            parts.push(planModePrompt);
+          }
+
+          // Deferred result prompt (new)
+          if (this._d.getDeferredResultStore?.()) {
+            const isZh = String(this._d.getAgent()?.config?.locale || "").startsWith("zh");
+            parts.push(isZh
+              ? "收到 <hana-background-result> 标签中的内容时，这是后台任务完成的系统通知，不是用户发送的消息。请根据通知内容自然地告知用户任务结果。如果通知中包含文件路径，使用 stage_files 工具呈现给用户。"
+              : "When you receive content inside <hana-background-result> tags, this is a system notification about a completed background task, NOT a user message. Respond naturally to inform the user about the task result. If file paths are included, use stage_files to present them to the user."
+            );
+          }
+
+          return parts;
         },
       },
     });
 
     const { tools: sessionTools, customTools: sessionCustomTools } = this._d.buildTools(effectiveCwd, null, { workspace: this._d.getHomeCwd() });
-    const { session } = await createAgentSession({
+    const sessionOpts = {
       cwd: effectiveCwd,
       sessionManager: sessionMgr,
       settingsManager: this._createSettings(effectiveModel),
       authStorage: models.authStorage,
       modelRegistry: models.modelRegistry,
-      model: effectiveModel,
       thinkingLevel: models.resolveThinkingLevel(this._d.getPrefs().getThinkingLevel()),
       resourceLoader,
       tools: sessionTools,
       customTools: sessionCustomTools,
-    });
+    };
+    // 新建 session 传 model；恢复 session 不传，让 PI SDK 从 JSONL 读取（单一数据源）
+    if (effectiveModel) sessionOpts.model = effectiveModel;
+    const { session, modelFallbackMessage } = await createAgentSession(sessionOpts);
+    if (modelFallbackMessage) {
+      log.warn(`session model fallback: ${modelFallbackMessage}`);
+    }
+    const resolvedModel = session.model;
     const elapsed = Date.now() - t0;
-    log.log(`session created (${elapsed}ms), model=${effectiveModel?.name || "?"}`);
+    log.log(`session created (${elapsed}ms), model=${resolvedModel?.name || effectiveModel?.name || "?"}`);
     this._session = session;
     this._sessionStarted = false;
 
@@ -152,16 +177,12 @@ export class SessionCoordinator {
     const old = this._sessions.get(mapKey);
     if (old) old.unsub();
 
-    const initialPlanMode = this._pendingPlanMode;
-    this._pendingPlanMode = false;
-
     Object.assign(sessionEntry, {
       session,
       agentId: this._d.getActiveAgentId(),
       memoryEnabled,
-      planMode: initialPlanMode,
-      modelId: effectiveModel?.id || null,
-      modelProvider: effectiveModel?.provider || null,
+      modelId: resolvedModel?.id || effectiveModel?.id || null,
+      modelProvider: resolvedModel?.provider || effectiveModel?.provider || null,
       lastTouchedAt: Date.now(),
       unsub,
     });
@@ -185,6 +206,7 @@ export class SessionCoordinator {
         const agent = this._d.getAgentById(entry.agentId) || this._d.getAgent();
         agent?._memoryTicker?.notifySessionEnd(key).catch(() => {});
         entry.unsub();
+        this._d.getDeferredResultStore?.()?.clearBySession(key);
         this._sessions.delete(key);
         if (this._sessions.size <= MAX_CACHED_SESSIONS) break;
       }
@@ -203,21 +225,14 @@ export class SessionCoordinator {
       await this._d.switchAgentOnly(targetAgentId);
     }
 
-    // 从 session-meta.json 恢复记忆开关 & 模型
+    // 从 session-meta.json 恢复记忆开关（model 由 PI SDK 从 JSONL 恢复，不在此处读取）
     let memoryEnabled = true;
-    let savedModelRef = null;  // {id, provider} or null
     try {
       const metaPath = path.join(this._d.getAgent().sessionDir, "session-meta.json");
       const meta = await this._readMetaCached(metaPath);
       const sessKey = path.basename(sessionPath);
       const metaEntry = meta[sessKey];
       if (metaEntry?.memoryEnabled === false) memoryEnabled = false;
-      // 读取新格式 model:{id,provider} 或旧格式 modelId
-      if (metaEntry?.model && typeof metaEntry.model === "object") {
-        savedModelRef = metaEntry.model;
-      } else if (metaEntry?.modelId) {
-        savedModelRef = { id: metaEntry.modelId, provider: "" };
-      }
     } catch (err) {
       if (err.code !== "ENOENT") {
         log.warn(`session-meta.json 读取失败: ${err.message}`);
@@ -251,18 +266,10 @@ export class SessionCoordinator {
         await oldAgent?._memoryTicker?.notifySessionEnd(oldSp).catch(() => {});
       }
     }
-    // 冷启动恢复：从 session-meta.json 解析 model，传给 createSession
-    let savedModel = null;
-    if (savedModelRef) {
-      const models = this._d.getModels();
-      savedModel = findModel(models.availableModels, savedModelRef.id, savedModelRef.provider || undefined);
-      if (!savedModel) {
-        log.warn(`cold-start model not found (${savedModelRef.id}), using agent default`);
-      }
-    }
+    // 冷启动恢复：model 由 PI SDK 从 session JSONL 恢复（单一数据源），不从 session-meta.json 读
     const sessionMgr = SessionManager.open(sessionPath, this._d.getAgent().sessionDir);
     const cwd = sessionMgr.getCwd?.() || undefined;
-    return this.createSession(sessionMgr, cwd, memoryEnabled, savedModel);
+    return this.createSession(sessionMgr, cwd, memoryEnabled, null, { restore: true });
   }
 
   async prompt(text, opts) {
@@ -412,6 +419,7 @@ export class SessionCoordinator {
 
       // 清理该 session 的 pending confirmation
       this._d.getConfirmStore?.()?.abortBySession(sessionPath);
+      this._d.getDeferredResultStore?.()?.clearBySession(sessionPath);
     }
     if (sessionPath === this.currentSessionPath) {
       this._session = null;
@@ -517,6 +525,29 @@ export class SessionCoordinator {
     this._titlesCache.set(sessionDir, { titles: { ...titles }, ts: Date.now() });
   }
 
+  async getTitlesForPaths(paths) {
+    const titles = {};
+    for (const p of paths) titles[p] = null;
+
+    const byDir = new Map();
+    for (const p of paths) {
+      const dir = path.dirname(p);
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir).push(p);
+    }
+
+    for (const [dir, sessionPaths] of byDir) {
+      try {
+        const dirTitles = await this._loadSessionTitlesFor(dir);
+        for (const sp of sessionPaths) {
+          if (dirTitles[sp]) titles[sp] = dirTitles[sp];
+        }
+      } catch { /* ignore */ }
+    }
+
+    return titles;
+  }
+
   async _loadSessionTitlesFor(sessionDir) {
     const cached = this._titlesCache.get(sessionDir);
     if (cached && Date.now() - cached.ts < SessionCoordinator._TITLES_TTL) {
@@ -598,16 +629,18 @@ export class SessionCoordinator {
     };
   }
 
-  promoteActivitySession(activitySessionFile) {
-    const agent = this._d.getAgent();
+  promoteActivitySession(activitySessionFile, agentId) {
+    const agent = agentId ? this._d.getAgentById(agentId) : this._d.getAgent();
+    if (!agent) return null;
     const oldPath = path.join(agent.agentDir, "activity", activitySessionFile);
     if (!fs.existsSync(oldPath)) return null;
 
     const newPath = path.join(agent.sessionDir, activitySessionFile);
     try {
+      fs.mkdirSync(agent.sessionDir, { recursive: true });
       fs.renameSync(oldPath, newPath);
       agent._memoryTicker?.notifyPromoted(newPath);
-      log.log(`promoted activity session: ${activitySessionFile}`);
+      log.log(`promoted activity session: ${activitySessionFile} (agent=${agent.id})`);
       return newPath;
     } catch (err) {
       log.error(`promoteActivitySession failed: ${err.message}`);
@@ -628,8 +661,9 @@ export class SessionCoordinator {
 
     const bm = BrowserManager.instance();
     const wasBrowserRunning = bm.isRunning;
-    this._headlessRefCount++;
-    if (this._headlessRefCount === 1) bm.setHeadless(true);
+    const opId = `iso_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    this._headlessOps.add(opId);
+    if (this._headlessOps.size === 1) bm.setHeadless(true);
     let tempSessionMgr;
     const cleanupTempSession = () => {
       const sp = tempSessionMgr?.getSessionFile?.();
@@ -638,7 +672,7 @@ export class SessionCoordinator {
       }
     };
     try {
-      const sessionDir = opts.persist || targetAgent.sessionDir;
+      const sessionDir = opts.persist || path.join(targetAgent.agentDir, '.ephemeral');
       fs.mkdirSync(sessionDir, { recursive: true });
 
       const execCwd = opts.cwd || this._d.getHomeCwd() || process.cwd();
@@ -674,8 +708,10 @@ export class SessionCoordinator {
       const patrolAllowed = opts.toolFilter
         || targetAgent.config?.desk?.patrol_tools
         || PATROL_TOOLS_DEFAULT;
-      const allowSet = new Set(patrolAllowed);
-      const actCustomTools = allCustomTools.filter(t => allowSet.has(t.name));
+      // "*" = allow all custom tools (subagent needs plugin query tools)
+      const actCustomTools = patrolAllowed === "*"
+        ? allCustomTools
+        : allCustomTools.filter(t => new Set(patrolAllowed).has(t.name));
 
       // builtin tools 过滤：传入 builtinFilter 时只保留白名单内的 builtin 工具
       const actTools = opts.builtinFilter
@@ -685,10 +721,23 @@ export class SessionCoordinator {
       const agent = this._d.getAgent();
       const skills = this._d.getSkills();
       const resourceLoader = this._d.getResourceLoader();
+      // 快照 prompt，隔离于其他 session 的 prompt 变更
+      // withMemory: 临时开启记忆构建 prompt，再恢复（巡检用）
+      let isolatedPrompt;
+      if (opts.withMemory && !targetAgent.memoryEnabled) {
+        const savedState = targetAgent.sessionMemoryEnabled;
+        targetAgent.setMemoryEnabled(true);
+        isolatedPrompt = targetAgent.systemPrompt;
+        targetAgent.setMemoryEnabled(savedState);
+      } else {
+        isolatedPrompt = targetAgent.systemPrompt;
+      }
       const execResourceLoader = (targetAgent === agent)
-        ? resourceLoader
+        ? Object.create(resourceLoader, {
+            getSystemPrompt: { value: () => isolatedPrompt },
+          })
         : Object.create(resourceLoader, {
-            getSystemPrompt: { value: () => targetAgent.systemPrompt },
+            getSystemPrompt: { value: () => isolatedPrompt },
             getSkills: { value: () => skills.getSkillsForAgent(targetAgent) },
           });
 
@@ -750,8 +799,8 @@ export class SessionCoordinator {
       }
       return { sessionPath: null, replyText: "", error: err.message };
     } finally {
-      this._headlessRefCount = Math.max(0, this._headlessRefCount - 1);
-      if (this._headlessRefCount === 0) bm.setHeadless(false);
+      this._headlessOps.delete(opId);
+      if (this._headlessOps.size === 0) bm.setHeadless(false);
       const browserNowRunning = bm.isRunning;
       if (browserNowRunning !== wasBrowserRunning) {
         this._d.emitEvent({ type: "browser_bg_status", running: browserNowRunning, url: bm.currentUrl }, null);
@@ -761,12 +810,6 @@ export class SessionCoordinator {
 
   /** 创建 session 专用 settings（控制 compaction + max_completion_tokens） */
   _createSettings(model) {
-    return SettingsManager.inMemory({
-      compaction: {
-        enabled: true,
-        reserveTokens: 16384,
-        keepRecentTokens: 20_000,
-      },
-    });
+    return createDefaultSettings();
   }
 }

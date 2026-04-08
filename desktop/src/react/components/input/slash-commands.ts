@@ -65,13 +65,14 @@ The above is a format example; actual content should be extracted from the conve
 
 // ── Slash Command Interface ──
 
-export interface SlashCommand {
+export interface SlashItem {
   name: string;
   label: string;
   description: string;
   busyLabel: string;
   icon: string;
-  execute: () => Promise<void>;
+  type: 'builtin' | 'skill';
+  execute: () => Promise<void> | void;
 }
 
 export interface AcpxProgressEvent {
@@ -247,7 +248,7 @@ export function buildSlashCommands(
   executeDiaryFn: () => Promise<void>,
   executeXingFn: () => Promise<void>,
   executeCompactFn: () => Promise<void>,
-): SlashCommand[] {
+): SlashItem[] {
   return [
     {
       name: 'acpx',
@@ -263,6 +264,7 @@ export function buildSlashCommands(
       description: t('slash.diary'),
       busyLabel: t('slash.diaryBusy'),
       icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+      type: 'builtin',
       execute: executeDiaryFn,
     },
     {
@@ -271,6 +273,7 @@ export function buildSlashCommands(
       description: t('slash.xing'),
       busyLabel: '',
       icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+      type: 'builtin',
       execute: executeXingFn,
     },
     {
@@ -279,6 +282,7 @@ export function buildSlashCommands(
       description: t('slash.compact'),
       busyLabel: t('slash.compactBusy'),
       icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>',
+      type: 'builtin',
       execute: executeCompactFn,
     },
   ];

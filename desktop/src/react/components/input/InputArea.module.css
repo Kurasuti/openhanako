@@ -41,6 +41,29 @@
     min-width: 0;
 }
 
+/* 附件添加按钮 */
+.attach-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid rgba(var(--accent-rgb), 0.12);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--duration) var(--ease-out);
+    -webkit-app-region: no-drag;
+    flex-shrink: 0;
+}
+
+.attach-btn:hover {
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.25);
+}
+
 /* Plan Mode 按钮 */
 .plan-mode-btn {
     display: inline-flex;
@@ -623,12 +646,24 @@
     display: flex;
     flex-direction: column;
     background: var(--bg-card);
-    border: 1px solid rgba(var(--accent-rgb), 0.12);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 4px 16px var(--shadow);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
     padding: 4px;
     margin-bottom: 6px;
     max-width: 360px;
+    max-height: 308px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.slash-menu::-webkit-scrollbar {
+    width: 4px;
+}
+
+.slash-menu::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 2px;
 }
 
 .slash-menu-item {
@@ -644,6 +679,7 @@
     color: var(--text);
     font-size: 0.88rem;
     transition: background 0.12s;
+    overflow: hidden;
 }
 
 .slash-menu-item:hover,
@@ -666,6 +702,7 @@
 .slash-menu-label {
     font-weight: 500;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .slash-menu-desc {
@@ -673,6 +710,10 @@
     font-size: 0.82rem;
     margin-left: auto;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    padding-right: 2px;
 }
 
 .slash-busy-bar {
@@ -683,6 +724,9 @@
     margin-bottom: 6px;
     font-size: 0.85rem;
     color: var(--text-muted);
+    background: var(--bg-card, #fff);
+    border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 
 .slash-busy-dot {
@@ -704,6 +748,22 @@
 @keyframes slash-pulse {
     0%, 100% { opacity: 0.3; }
     50% { opacity: 1; }
+}
+
+.slash-result-dot-ok {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6a9;
+    flex-shrink: 0;
+}
+
+.slash-result-dot-err {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #c08080;
+    flex-shrink: 0;
 }
 
 .slash-error-bar {
@@ -926,4 +986,33 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.3rem;
+}
+
+/* TipTap editor container */
+.input-box :global(.tiptap) {
+    outline: none;
+    min-height: 1.6em;
+    max-height: 120px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.input-box :global(.tiptap)::-webkit-scrollbar {
+    display: none;
+}
+
+.input-box :global(.tiptap p.is-editor-empty:first-child::before) {
+    content: attr(data-placeholder);
+    color: var(--text-muted);
+    pointer-events: none;
+    float: left;
+    height: 0;
+}
+
+.input-box :global(.tiptap p) {
+    margin: 0;
 }

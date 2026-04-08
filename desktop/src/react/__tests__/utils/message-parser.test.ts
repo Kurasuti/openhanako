@@ -183,24 +183,42 @@ describe('truncateHead', () => {
 });
 
 describe('extractToolDetail', () => {
-  it('read 工具提取文件路径', () => {
-    expect(extractToolDetail('read', { file_path: '/a/b.txt' })).toContain('b.txt');
+  it('read 工具提取文件路径并附带 href', () => {
+    const d = extractToolDetail('read', { file_path: '/a/b.txt' });
+    expect(d.text).toContain('b.txt');
+    expect(d.href).toBe('/a/b.txt');
+    expect(d.hrefType).toBe('file');
   });
 
-  it('bash 工具提取命令', () => {
-    expect(extractToolDetail('bash', { command: 'ls -la' })).toBe('ls -la');
+  it('bash 工具提取命令，无 href', () => {
+    const d = extractToolDetail('bash', { command: 'ls -la' });
+    expect(d.text).toBe('ls -la');
+    expect(d.href).toBeUndefined();
   });
 
-  it('web_search 提取查询', () => {
-    expect(extractToolDetail('web_search', { query: 'test query' })).toBe('test query');
+  it('web_search 提取查询，无 href', () => {
+    const d = extractToolDetail('web_search', { query: 'test query' });
+    expect(d.text).toBe('test query');
+    expect(d.href).toBeUndefined();
   });
 
-  it('未知工具返回空', () => {
-    expect(extractToolDetail('unknown_tool', { foo: 'bar' })).toBe('');
+  it('web_fetch 提取 hostname 并附带 url href', () => {
+    const d = extractToolDetail('web_fetch', { url: 'https://example.com/path' });
+    expect(d.text).toBe('example.com');
+    expect(d.href).toBe('https://example.com/path');
+    expect(d.hrefType).toBe('url');
+  });
+
+  it('未知工具取第一个字符串参数作详情', () => {
+    expect(extractToolDetail('unknown_tool', { foo: 'bar' }).text).toBe('bar');
+  });
+
+  it('未知工具无字符串参数返回空', () => {
+    expect(extractToolDetail('unknown_tool', { n: 42 }).text).toBe('');
   });
 
   it('无 args 返回空', () => {
-    expect(extractToolDetail('read', undefined)).toBe('');
+    expect(extractToolDetail('read', undefined).text).toBe('');
   });
 });
 

@@ -108,9 +108,12 @@ Declare `"trust": "full-access"` in manifest:
 ```json
 {
   "id": "my-advanced-plugin",
-  "trust": "full-access"
+  "trust": "full-access",
+  "minAppVersion": "0.82.0"
 }
 ```
+
+`minAppVersion` (optional) declares the minimum Hanako version required to run the plugin. If the current app version is lower, the plugin will not load and its status is set to `incompatible`. All plugins should declare this field to prevent compatibility issues on older versions.
 
 The user must enable the "Allow full-access plugins" toggle in Settings → Plugins. **When the toggle is off, full-access plugins are not loaded at all** (no partial loading) until the user explicitly enables it.
 
@@ -161,6 +164,31 @@ return {
 ```
 
 The framework automatically extracts `details.media.mediaUrls` and delivers them according to context (desktop renders file cards, bridge sends to the other party). The tool itself doesn't need to be aware of the runtime environment.
+
+#### Visual Cards
+
+Tools can automatically render visual cards (iframes) in the chat by declaring `card` in the return value's `details`:
+
+```js
+return {
+  content: [{ type: "text", text: "Data summary..." }],
+  details: {
+    card: {
+      type: "iframe",
+      route: "/card/chart?symbol=sh600519&period=daily",
+      title: "Kweichow Moutai Daily K",
+      description: "Kweichow Moutai price 1450.00 change +2.11%",
+    },
+  },
+};
+```
+
+- `route`: Plugin route path; the iframe fetches data and renders from this path
+- `title`: Card title (optional)
+- `description`: Plain text summary, used for IM platform fallback and when the plugin is uninstalled
+- `pluginId` is auto-injected by the framework; tools don't need to set it
+- Cards render immediately when the tool completes, independent of LLM behavior
+- Card data is stored in JSONL with the toolResult and auto-restored on session reload
 
 ### Skills (Knowledge Injection)
 
@@ -304,6 +332,63 @@ Declare in `manifest.json` under `contributes.configuration` using JSON Schema:
 ```
 
 Read/write config via `ctx.config.get(key)` / `ctx.config.set(key, value)`, persisted in `plugin-data/{pluginId}/config.json`.
+
+### Page (Plugin Page) ⚡ full-access
+
+A plugin can register a full-page view in the top tab bar, at the same level as "Chat/Channel". When the user switches to that tab, the plugin's iframe occupies the entire window space.
+
+Declare in `manifest.json` under `contributes`:
+
+```json
+{
+  "contributes": {
+    "page": {
+      "title": { "zh": "金融", "en": "Finance" },
+      "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><polyline points='22 12 18 12 15 21 9 3 6 12 2 12'/></svg>",
+      "route": "/dashboard"
+    }
+  }
+}
+```
+
+- `title`: Display name. Accepts a plain string or an i18n object `{ zh, en, ... }`
+- `icon`: Strongly recommended to provide an inline SVG (stroke style, `currentColor`). Falls back to the first character of the title if omitted
+- `route`: Relative path for the plugin route. The actual URL is `/api/plugins/{pluginId}{route}`
+- A plugin can declare both a `page` and a `widget` simultaneously — they are independent
+- Hovering over the tab shows the plugin's full name (tooltip)
+- When there are more than 5 tabs, extras are collapsed into an overflow dropdown menu; users can drag to reorder
+
+Plugin pages are rendered via iframe. The plugin must send a handshake signal after loading:
+
+```js
+window.parent.postMessage({ type: 'ready' }, '*');
+```
+
+The host appends `hana-theme` and `hana-css` query parameters to the iframe URL. Plugins can optionally reference the theme CSS for visual consistency:
+
+```html
+<link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
+```
+
+### Widget (Sidebar Component) ⚡ full-access
+
+A plugin can register a component in the right-side Jian sidebar. A widget and a page can be declared simultaneously in the same plugin — they are independent and do not conflict.
+
+```json
+{
+  "contributes": {
+    "widget": {
+      "title": { "zh": "盯盘", "en": "Monitor" },
+      "icon": "<svg viewBox='0 0 24 24' .../>",
+      "route": "/sidebar"
+    }
+  }
+}
+```
+
+Field rules are the same as Page. The widget appears alongside the desk in the Jian sidebar, controlled by a button on the right side of the titlebar. When no widgets are registered, the button area is automatically hidden.
+
+Widgets are also rendered via iframe and must send the `ready` handshake signal.
 
 ## Manifest
 

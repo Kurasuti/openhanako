@@ -9,9 +9,11 @@
 
 import fs from "fs";
 import path from "path";
-import { createAgentSession, SessionManager, SettingsManager } from "../lib/pi-sdk/index.js";
+import { createAgentSession, SessionManager } from "../lib/pi-sdk/index.js";
 import { debugLog } from "../lib/debug-log.js";
 import { t } from "../server/i18n.js";
+import { createDefaultSettings } from "../core/session-defaults.js";
+import { READ_ONLY_BUILTIN_TOOLS } from "../core/config-coordinator.js";
 
 /**
  * 以指定 agentId 的身份跑一次临时会话。
@@ -29,7 +31,7 @@ import { t } from "../server/i18n.js";
  * @param {boolean} [opts.readOnly=false] - 只读模式（只保留读取类工具，排除写/编辑/ask_agent/dm 等）
  * @returns {Promise<string>}  capture 轮的输出（已去掉 MOOD 块）
  */
-export async function runAgentSession(agentId, rounds, { engine, signal, sessionSuffix = "temp", systemAppend, keepSession = false, noMemory = false, noTools = false, readOnly = false } = {}) {
+export async function runAgentSession(agentId, rounds, { engine, signal, sessionSuffix = "temp", ephemeralDir, systemAppend, keepSession = false, noMemory = false, noTools = false, readOnly = false } = {}) {
   // 1. 从长驻 Map 获取 Agent 实例
   const agent = engine.getAgent(agentId);
   if (!agent) {
@@ -49,7 +51,7 @@ export async function runAgentSession(agentId, rounds, { engine, signal, session
 
   // 3. 临时 session
   const cwd = engine.homeCwd || process.cwd();
-  const sessionDir = path.join(agentDir, "sessions", sessionSuffix);
+  const sessionDir = ephemeralDir || path.join(agentDir, "sessions", sessionSuffix);
   fs.mkdirSync(sessionDir, { recursive: true });
   const tempSessionMgr = SessionManager.create(cwd, sessionDir);
 
@@ -61,9 +63,8 @@ export async function runAgentSession(agentId, rounds, { engine, signal, session
   } else {
     const built = ctx.buildTools(cwd, agent.tools, { agentDir, workspace: engine.homeCwd });
     if (readOnly) {
-      const READ_ONLY_BUILTIN = ["read", "grep", "find", "ls"];
       const READ_ONLY_CUSTOM = ["search_memory", "recall_experience", "web_search", "web_fetch"];
-      tools = built.tools.filter(t => READ_ONLY_BUILTIN.includes(t.name));
+      tools = built.tools.filter(t => READ_ONLY_BUILTIN_TOOLS.includes(t.name));
       customTools = (built.customTools || []).filter(t => READ_ONLY_CUSTOM.includes(t.name));
     } else {
       tools = built.tools;
@@ -74,13 +75,7 @@ export async function runAgentSession(agentId, rounds, { engine, signal, session
   const { session } = await createAgentSession({
     cwd,
     sessionManager: tempSessionMgr,
-    settingsManager: SettingsManager.inMemory({
-      compaction: {
-        enabled: true,
-        reserveTokens: 16384,
-        keepRecentTokens: 20_000,
-      },
-    }),
+    settingsManager: createDefaultSettings(),
     authStorage: ctx.authStorage,
     modelRegistry: ctx.modelRegistry,
     model,

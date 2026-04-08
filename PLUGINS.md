@@ -108,9 +108,12 @@ restricted 插件的 tool/command 代码在主进程运行，有完整的 Node.j
 ```json
 {
   "id": "my-advanced-plugin",
-  "trust": "full-access"
+  "trust": "full-access",
+  "minAppVersion": "0.82.0"
 }
 ```
+
+`minAppVersion`（可选）声明插件运行所需的最低 Hanako 版本。如果当前 app 版本低于该值，插件不会加载，状态标记为 `incompatible`。建议所有插件都声明此字段，避免用户在旧版本上遇到不兼容问题。
 
 用户需要在设置 → 插件页面开启"允许全权插件"开关。**开关关着时，full-access 插件完全不会加载**（不会部分加载），直到用户主动打开开关。
 
@@ -161,6 +164,31 @@ return {
 ```
 
 框架会自动提取 `details.media.mediaUrls` 并根据上下文投递（桌面渲染文件卡片，bridge 发送给对方）。工具本身不需要感知运行环境。
+
+#### 可视化卡片
+
+工具可以在聊天中自动渲染可视化卡片（iframe），在返回值的 `details` 中声明 `card`：
+
+```js
+return {
+  content: [{ type: "text", text: "数据摘要..." }],
+  details: {
+    card: {
+      type: "iframe",
+      route: "/card/chart?symbol=sh600519&period=daily",
+      title: "贵州茅台 日K",
+      description: "贵州茅台 现价1450.00 涨跌+2.11%",
+    },
+  },
+};
+```
+
+- `route`：插件路由路径，iframe 自行从该路径拉数据渲染
+- `title`：卡片标题（可选）
+- `description`：纯文本摘要，用于 IM 平台降级显示和插件卸载后的 fallback
+- `pluginId` 由框架自动注入，工具无需填写
+- 卡片在工具完成时立即渲染，不依赖 LLM 行为
+- 卡片数据随 toolResult 存入 JSONL，会话重载时自动恢复
 
 ### Skills（知识注入）
 
@@ -304,6 +332,63 @@ export const defaultApi = "openai-completions";
 ```
 
 配置通过 `ctx.config.get(key)` / `ctx.config.set(key, value)` 读写，持久化在 `plugin-data/{pluginId}/config.json`。
+
+### Page（插件页面）⚡ full-access
+
+插件可以在顶部 tab 栏注册一个全页面视图，跟「聊天/频道」同级。切换到该 tab 后，插件的 iframe 占据整个窗口空间。
+
+在 `manifest.json` 的 `contributes` 中声明：
+
+```json
+{
+  "contributes": {
+    "page": {
+      "title": { "zh": "金融", "en": "Finance" },
+      "icon": "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><polyline points='22 12 18 12 15 21 9 3 6 12 2 12'/></svg>",
+      "route": "/dashboard"
+    }
+  }
+}
+```
+
+- `title`：显示名，支持字符串或 `{ zh, en, ... }` 国际化对象
+- `icon`：强烈建议提供内联 SVG（stroke 风格，`currentColor`）。缺省时取 title 首字
+- `route`：插件 route 的相对路径，实际 URL 为 `/api/plugins/{pluginId}{route}`
+- 一个插件可以同时声明 `page` 和 `widget`，互不冲突
+- 悬停 tab 时显示插件全名（tooltip）
+- Tab 超过 5 个时自动折叠到 overflow 下拉菜单，用户可拖拽排序
+
+插件页面通过 iframe 渲染，需要在加载完成后发送握手信号：
+
+```js
+window.parent.postMessage({ type: 'ready' }, '*');
+```
+
+宿主会在 iframe URL 上附加 `hana-theme` 和 `hana-css` 参数，插件可选择引用主题 CSS 以保持视觉一致：
+
+```html
+<link rel="stylesheet" href="${new URLSearchParams(location.search).get('hana-css')}">
+```
+
+### Widget（侧栏组件）⚡ full-access
+
+插件可以在右侧 Jian 侧栏注册一个组件。Widget 与 Page 可以同时声明，互不冲突。
+
+```json
+{
+  "contributes": {
+    "widget": {
+      "title": { "zh": "盯盘", "en": "Monitor" },
+      "icon": "<svg viewBox='0 0 24 24' .../>",
+      "route": "/sidebar"
+    }
+  }
+}
+```
+
+字段规则同 Page。Widget 在 Jian 侧栏的书桌旁显示，由 titlebar 右侧的按钮控制。没有 widget 注册时按钮区域自动隐藏。
+
+Widget 同样通过 iframe 渲染，需要发送 `ready` 握手信号。
 
 ## Manifest
 

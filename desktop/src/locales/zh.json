@@ -2,6 +2,7 @@
   "channel": {
     "tab": "频道",
     "chatTab": "聊天",
+    "moreTabs": "更多标签",
     "empty": "还没有频道 ✿",
     "dmLabel": "私聊",
     "dmHint": "仅显示主助手的私聊",
@@ -80,7 +81,12 @@
     "me": "我",
     "more": "更多",
     "empty": "空",
-    "edit": "编辑"
+    "edit": "编辑",
+    "screenshot": "截图",
+    "selectMessage": "选择消息",
+    "screenshotSaved": "截图已保存",
+    "screenshotFailed": "截图保存失败",
+    "selectedCount": "已选 {count} 条"
   },
   "chat": {
     "send": "发送",
@@ -117,6 +123,7 @@
     "planMode": "操作电脑",
     "deskContext": "看着书桌说",
     "pastedImage": "粘贴图片",
+    "attachFiles": "添加文件",
     "docContext": "看着文档说",
     "thinkingLevel": {
       "off": "关闭",
@@ -407,6 +414,56 @@
       "done": "🌐 {name} 操作完了",
       "failed": "🌐 {name} 浏览器不听使唤"
     },
+    "subagent": {
+      "running": "🧭 {name} 分身查探中",
+      "done": "🧭 分身出发了",
+      "failed": "🧭 分身出了岔子"
+    },
+    "ask_agent": {
+      "running": "💬 {name} 请教中",
+      "done": "💬 已发出请教",
+      "failed": "💬 没问到"
+    },
+    "check_pending_tasks": {
+      "running": "📋 {name} 正在找找没做完的事儿",
+      "done": "📋 {name} 找完了",
+      "failed": "📋 找不着"
+    },
+    "cron": {
+      "running": "⏰ {name} 正在设定时任务",
+      "done": "⏰ 设好了",
+      "failed": "⏰ 没设成"
+    },
+    "notify": {
+      "running": "🔔 {name} 正在发通知",
+      "done": "🔔 通知发了",
+      "failed": "🔔 通知没发出去"
+    },
+    "artifact": {
+      "running": "🖼️ {name} 正在写写画画",
+      "done": "🖼️ 画好了",
+      "failed": "🖼️ 画崩了"
+    },
+    "dm": {
+      "running": "✉️ {name} 打开了手机",
+      "done": "✉️ 发出去了",
+      "failed": "✉️ 没发出去"
+    },
+    "channel": {
+      "running": "📢 {name} 正在频道发言",
+      "done": "📢 发完了",
+      "failed": "📢 发不出去"
+    },
+    "install_skill": {
+      "running": "📥 {name} 正在装技能",
+      "done": "📥 装好了",
+      "failed": "📥 没装上"
+    },
+    "update_settings": {
+      "running": "⚙️ {name} 正在改设置",
+      "done": "⚙️ 改好了",
+      "failed": "⚙️ 没改成"
+    },
     "_fallback": {
       "running": "🔧 {name} 正在忙碌中…",
       "done": "🔧 {name} 忙完了",
@@ -455,8 +512,10 @@
       "work": "工作",
       "skills": "技能",
       "bridge": "社交平台",
+      "sharing": "分享",
       "plugins": "插件",
-      "about": "关于"
+      "about": "关于",
+      "security": "安全"
     },
     "appearance": {
       "title": "外观",
@@ -536,15 +595,6 @@
       "license": "许可证",
       "copyright": "版权",
       "licenseToggle": "许可证全文",
-      "permissions": "权限",
-      "fullAccess": "全权模式",
-      "fullAccessDesc": "关闭沙盒隔离和命令限制，Agent 拥有完整的文件系统和终端权限（新会话生效）",
-      "fullAccessWarningTitle": "关于全权模式",
-      "fullAccessWarningBody1": "开启后，Agent 将获得完整的系统权限，包括：",
-      "fullAccessWarningBody2": "1. 文件系统不受沙盒保护，可读写任意路径\n2. 终端命令不受限制，可执行 sudo、chmod 等操作\n3. OS 级隔离（macOS Seatbelt / Linux bubblewrap）将被关闭",
-      "fullAccessWarningBody3": "仅建议在完全信任 Agent 行为且需要系统级操作时开启。",
-      "fullAccessCancel": "取消",
-      "fullAccessConfirm": "我了解风险，开启",
       "updateAvailable": "有新版本可用：v{version}",
       "updateDownload": "下载",
       "updateChecking": "正在检查更新…",
@@ -558,6 +608,24 @@
       "updateNeedInstall": "请先将 Hanako 移动到应用程序文件夹",
       "updateDiskSpace": "磁盘空间不足，无法下载更新",
       "betaUpdates": "接收测试版更新"
+    },
+    "security": {
+      "sandbox": "沙盒",
+      "sandboxDesc": "限制 AI 的文件系统访问范围，仅允许操作工作目录和必要的数据文件夹",
+      "sandboxWarning": "关闭沙盒后 AI 可以访问系统上的任意文件，可能产生意想不到的结果",
+      "fileBackup": "文件备份",
+      "fileBackupDesc": "AI 修改或删除文件前自动保存原始内容",
+      "retention": "保留时长",
+      "retention1d": "1 天",
+      "retention3d": "3 天",
+      "retention7d": "7 天",
+      "maxFileSize": "忽略大于",
+      "viewBackups": "查看备份",
+      "hideBackups": "收起",
+      "restoreBtn": "恢复",
+      "noBackups": "暂无备份记录",
+      "restoreSuccess": "已恢复",
+      "restoreFailed": "恢复失败"
     },
     "me": {
       "title": "我",
@@ -874,6 +942,21 @@
       "pluginsDir": "插件目录：{path}",
       "needsFullAccess": "请先开启「允许全权插件」"
     },
+    "screenshot": {
+      "title": "截图分享",
+      "desc": "选择你分享对话的截图样式与排版",
+      "color": "配色",
+      "width": "宽度",
+      "light": "浅色",
+      "dark": "深色",
+      "sakura": "青空与樱",
+      "mobile": "手机看",
+      "desktop": "电脑看",
+      "mobileTitle": "手机排版",
+      "mobileDesc": "长图，适合手机分享",
+      "desktopTitle": "电脑排版",
+      "desktopDesc": "更宽，适合电脑保存与分享"
+    },
     "bridge": {
       "telegram": "Telegram",
       "telegramToken": "Bot Token",
@@ -1021,7 +1104,8 @@
     "cronDone": "定时任务执行完毕",
     "error": "执行异常",
     "viewSession": "查看对话 →",
-    "duration": "耗时 {text}"
+    "duration": "耗时 {text}",
+    "promote": "升格为对话"
   },
   "automation": {
     "title": "任务计划",
@@ -1029,6 +1113,12 @@
     "defaultModel": "默认模型",
     "edit": "编辑",
     "delete": "删除"
+  },
+  "ctx": {
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "selectAll": "全选"
   },
   "desk": {
     "title": "书桌",
@@ -1042,6 +1132,8 @@
     "openInFinder": "打开文件夹",
     "jianLabel": "笺",
     "jianPlaceholder": "写点什么，告诉助手这个文件夹里面的文件该如何处理...",
+    "execLogLabel": "执行记录",
+    "execLogDelete": "删除此条记录",
     "emptyTitle": "书桌还空空的呢",
     "emptyHint": "书桌是助手日常巡检的工作空间，也是每次对话的默认目录\n去设置里指定一个文件夹吧",
     "goToSettings": "前往设置",
@@ -1095,7 +1187,7 @@
     "empty": "暂无消息记录",
     "notConfigured": "尚未配置 {platform}",
     "goToSettings": "前往设置",
-    "resetContext": "清除上下文",
+    "resetContext": "重启上下文",
     "resetContextTip": "下次消息将开启新对话"
   },
   "error": {
@@ -1198,7 +1290,7 @@
     "agentNoReply": "（{name} 没有回复）",
     "agentCallFailed": "调用 {name} 失败: {msg}",
     "cronNoJobs": "没有定时任务",
-    "cronAddNeedParams": "错误：add 需要 type, schedule, prompt 参数",
+    "cronAddNeedParams": "错误：add 需要 scheduleType, schedule, prompt 参数",
     "cronEveryMustBeNumber": "错误：every 类型的 schedule 必须是正整数（毫秒）",
     "cronCreated": "已创建定时任务: {label} ({id})",
     "cronConfirmed": "用户已确认，定时任务已创建: {label} ({id})",
@@ -1249,7 +1341,11 @@
     "settingsTimeout": "「{label}」修改确认超时，设置未变更",
     "subagentMaxConcurrent": "当前已有 {max} 个子 agent 在运行，请等待完成后再发起。",
     "subagentFailed": "子 agent 执行失败: {msg}",
+    "subagentTimeout": "子 agent 执行超时（{minutes} 分钟）",
+    "askAgentTimeout": "{name} 响应超时（{minutes} 分钟）",
     "subagentNoOutput": "(子 agent 未产生输出)",
+    "subagentDispatched": "子任务已派出 (task-id: {taskId})。完成后结果会自动送达。",
+    "askAgentDispatched": "已向 {name} 发送请求 (task-id: {taskId})。收到回复后会自动送达。",
     "installSkillDisabled": "自学技能能力未启用。请在设置中开启「允许 Agent 自行创建/安装技能」。",
     "installSkillGithubDisabled": "GitHub 技能获取未启用。请在设置中开启「允许从 GitHub 获取技能」。",
     "installSkillInvalidGithubUrl": "无效的 GitHub URL：{url}",
@@ -1453,7 +1549,7 @@
     },
     "askAgent": {
       "label": "跨 Agent 调用",
-      "description": "派任务给另一个 agent，立即拿到结果。对方会当场处理并回复，你可以直接把结果告诉用户。\n适用场景：让对方 review 代码、翻译一段文字、从对方的专业视角分析问题等需要即时反馈的任务。\n对方以自己的人格和模型回复，有只读工具（读文件、搜索、web fetch），不能写文件或调用其他 agent。\n提示：不确定该找哪个 agent 时，传 agent=\"?\" 可以查看所有可用 agent 的能力说明和模型。",
+      "description": "派任务给另一个 agent。任务在后台执行，对方回复后结果会自动送达当前对话。\n\n你的判断：\n- 如果当前还有可以并行推进的工作，继续做\n- 如果必须拿到回复才能进行下一步，告诉用户你已经派出去了、在等回复，然后正常等待即可\n\n适用场景：让对方 review 代码、翻译一段文字、从对方的专业视角分析问题等。\n对方以自己的人格和模型回复，有只读工具（读文件、搜索、web fetch），不能写文件或调用其他 agent。\n提示：不确定该找哪个 agent 时，传 agent=\"?\" 可以查看所有可用 agent 的能力说明和模型。",
       "agentDesc": "目标 agent 的 ID。传 \"?\" 可查看所有可用 agent。",
       "taskDesc": "任务描述（对方看到的完整 prompt）"
     },
@@ -1465,9 +1561,9 @@
     },
     "cron": {
       "label": "定时任务",
-      "description": "创建和管理定时任务。定时任务在后台自动执行，到时间时会开一个独立 session 运行指定的 prompt。\n操作：\n- list：查看所有任务\n- add(type, schedule, prompt, label?, model?)：创建任务\n  - type \"at\"：一次性，schedule 为 ISO 时间字符串\n  - type \"every\"：间隔，schedule 为毫秒数（如 3600000 = 1 小时）\n  - type \"cron\"：cron 表达式（如 \"0 7 * * *\" = 每天早上 7 点）\n  - model：可选，指定执行任务使用的模型（不填则使用默认对话模型）\n- remove(id)：删除任务\n- toggle(id)：启用/禁用任务",
+      "description": "创建和管理定时任务。定时任务在后台自动执行，到时间时会开一个独立 session 运行指定的 prompt。\n操作：\n- list：查看所有任务\n- add(scheduleType, schedule, prompt, label?, model?)：创建任务\n  - scheduleType \"at\"：一次性，schedule 为 ISO 时间字符串\n  - scheduleType \"every\"：间隔，schedule 为分钟数（如 60 = 每小时）\n  - scheduleType \"cron\"：cron 表达式（如 \"0 7 * * *\" = 每天早上 7 点）\n  - model：可选，指定执行任务使用的模型（不填则使用默认对话模型）\n- remove(id)：删除任务\n- toggle(id)：启用/禁用任务",
       "actionDesc": "操作类型",
-      "typeDesc": "调度类型（add 时必填）",
+      "scheduleTypeDesc": "调度类型（add 时必填）",
       "scheduleDesc": "调度参数：ISO 时间(at)，分钟数(every，如 60=每小时)，cron 表达式(cron)",
       "promptDesc": "到时间时执行的 prompt（add 时必填）",
       "labelDesc": "任务显示标签（可选）",
@@ -1513,7 +1609,7 @@
     },
     "subagent": {
       "label": "启动子 Agent",
-      "description": "启动一个子 agent 在隔离的上下文中处理独立任务。子 agent 在后台运行，拥有独立的上下文窗口，只返回最终结果，不占用当前对话的上下文。\n适用场景：\n- 需要大量搜索、阅读后总结为简短结论的调研任务\n- 可以和当前思路并行的独立子问题\n- 需要在多个方向同时探索的任务（可同时发起多个 subagent 调用）\n不适用：需要修改文件、执行命令等有副作用的操作\n\n重要：task 参数要写清楚完整的指令和必要背景，子 agent 看不到当前对话历史。",
+      "description": "启动一个子 agent 在隔离的上下文中处理独立任务。任务在后台执行，完成后结果会自动送达当前对话。\n\n你的判断：\n- 如果当前还有可以并行推进的工作，继续做\n- 如果必须拿到结果才能进行下一步，告诉用户你已经派出去了、在等回复，然后正常等待即可\n\n适用场景：\n- 需要大量搜索、阅读后总结为简短结论的调研任务\n- 可以和当前思路并行的独立子问题\n- 需要在多个方向同时探索的任务（可同时发起多个 subagent 调用）\n不适用：需要修改文件、执行命令等有副作用的操作\n\n重要：task 参数要写清楚完整的指令和必要背景，子 agent 看不到当前对话历史。",
       "taskDesc": "子 agent 的完整指令，包含必要的背景信息",
       "modelDesc": "指定模型（可选，默认使用 utility 模型）"
     },
@@ -1523,7 +1619,8 @@
       "githubUrlDesc": "GitHub 仓库 URL（模式 A）",
       "skillContentDesc": "SKILL.md 的完整内容（模式 B）",
       "skillNameDesc": "技能名称（模式 B 必填）",
-      "reasonDesc": "说明为什么需要这个技能（审计用，必填）"
+      "reasonDesc": "说明为什么需要这个技能（审计用，必填）",
+      "userRequestedDesc": "是否由用户主动请求安装（true 时安装为用户技能，否则为自学技能）"
     },
     "updateSettings": {
       "label": "设置",
@@ -1550,7 +1647,9 @@
       "workingDir": "工作目录",
       "workingDirDesc": "Agent 的文件系统工作目录",
       "theme": "主题",
-      "chatModel": "对话模型"
+      "chatModel": "对话模型",
+      "fileBackup": "文件备份",
+      "fileBackupDesc": "AI 修改或删除文件前自动备份"
     }
   },
   "cli": {

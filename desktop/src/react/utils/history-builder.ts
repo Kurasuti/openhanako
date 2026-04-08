@@ -5,7 +5,7 @@
  */
 
 import type { ChatMessage, ChatListItem, ContentBlock } from '../stores/chat-types';
-import { parseMoodFromContent, parseXingFromContent, parseUserAttachments } from './message-parser';
+import { parseMoodFromContent, parseXingFromContent, parseCardFromContent, parseUserAttachments } from './message-parser';
 import { renderMarkdown } from './markdown';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- API 历史消息 JSON 结构动态，难以静态收窄 */
@@ -33,6 +33,10 @@ export interface HistoryApiResponse {
     content: string;
     language?: string;
   }>;
+  cards?: Array<{
+    afterIndex: number;
+    card: { type: string; pluginId: string; route: string; title?: string; description?: string };
+  }>;
   todos?: any[];
   hasMore?: boolean;
 }
@@ -42,15 +46,19 @@ export interface HistoryApiResponse {
 export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] {
   const items: ChatListItem[] = [];
 
-  // 按 afterIndex 分组 fileOutputs 和 artifacts
+  // 按 afterIndex 分组 fileOutputs、artifacts、cards
   const fileMap: Record<number, Array<{ filePath: string; label: string; ext: string }>> = {};
   const artMap: Record<number, Array<{ artifactId: string; artifactType: string; title: string; content: string; language?: string }>> = {};
+  const cardMap: Record<number, Array<{ type: string; pluginId: string; route: string; title?: string; description?: string }>> = {};
 
   for (const fo of (data.fileOutputs || [])) {
     (fileMap[fo.afterIndex] ??= []).push(...fo.files);
   }
   for (const ar of (data.artifacts || [])) {
     (artMap[ar.afterIndex] ??= []).push(ar);
+  }
+  for (const cd of (data.cards || [])) {
+    (cardMap[cd.afterIndex] ??= []).push(cd.card);
   }
 
   for (let i = 0; i < data.messages.length; i++) {
@@ -146,8 +154,9 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         }
       }
 
-      // 4. 主文本（去掉 mood 和 xing 后的内容）
-      const { xingBlocks, text: mainText } = parseXingFromContent(afterMood);
+      // 4. 主文本（去掉 mood、xing 和 card 后的内容）
+      const { xingBlocks, text: afterXing } = parseXingFromContent(afterMood);
+      const { cards, text: mainText } = parseCardFromContent(afterXing);
       if (mainText) {
         blocks.push({ type: 'text', html: renderMarkdown(mainText) });
       }
@@ -157,7 +166,12 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         blocks.push({ type: 'xing', title: xb.title, content: xb.content, sealed: true });
       }
 
-      // 6. 跟在这条消息后面的 file outputs
+      // 6. Cards (after xing, before file outputs)
+      for (const card of cards) {
+        blocks.push({ type: 'plugin_card', card });
+      }
+
+      // 7. 跟在这条消息后面的 file outputs
       const files = fileMap[i];
       if (files) {
         for (const f of files) {
@@ -165,7 +179,7 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
         }
       }
 
-      // 7. 跟在这条消息后面的 artifacts
+      // 8. 跟在这条消息后面的 artifacts
       const arts = artMap[i];
       if (arts) {
         for (const a of arts) {
@@ -177,6 +191,17 @@ export function buildItemsFromHistory(data: HistoryApiResponse): ChatListItem[] 
             content: a.content,
             language: a.language,
           });
+        }
+      }
+
+      // 9. 跟在这条消息后面的 plugin cards（来自 toolResult.details.card）
+      const cds = cardMap[i];
+      if (cds) {
+        for (const cd of cds) {
+          blocks.push({
+            type: 'plugin_card',
+            card: { ...cd, type: cd.type || 'iframe' },
+          } as any);
         }
       }
 

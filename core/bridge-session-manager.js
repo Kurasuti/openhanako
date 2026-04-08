@@ -6,7 +6,8 @@
  */
 import fs from "fs";
 import path from "path";
-import { createAgentSession, SessionManager, SettingsManager } from "../lib/pi-sdk/index.js";
+import { createAgentSession, SessionManager } from "../lib/pi-sdk/index.js";
+import { createDefaultSettings } from "./session-defaults.js";
 import { debugLog } from "../lib/debug-log.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
 import { t, getLocale } from "../server/i18n.js";
@@ -197,10 +198,16 @@ export class BridgeSessionManager {
           throw new Error(t("error.bridgeAgentModelNotAvailable", { name: agent.agentName, model: ownerModelId }));
         }
 
+        // 快照 prompt，隔离于其他 session 的 prompt 变更（与 SessionCoordinator.createSession 一致）
+        const ownerPromptSnapshot = agent.buildSystemPrompt();
+        const ownerResourceLoader = Object.create(this._deps.getResourceLoader(), {
+          getSystemPrompt: { value: () => ownerPromptSnapshot },
+        });
+
         sessionOpts = {
           model: ownerModel,
           thinkingLevel: mm.resolveThinkingLevel(prefs?.thinking_level || "auto"),
-          resourceLoader: this._deps.getResourceLoader(),
+          resourceLoader: ownerResourceLoader,
           tools: bridgeTools,
           customTools: bridgeCustomTools,
           settingsManager: this._createSettings(ownerModel),
@@ -231,6 +238,10 @@ export class BridgeSessionManager {
           const media = event.result?.details?.media;
           if (media?.mediaUrls?.length) {
             toolMediaUrls.push(...media.mediaUrls);
+          }
+          const card = event.result?.details?.card;
+          if (card?.description) {
+            capturedText += (capturedText ? "\n\n" : "") + card.description;
           }
         }
       });
@@ -330,12 +341,6 @@ export class BridgeSessionManager {
 
   /** 创建 bridge 专用 settings：compaction 由 SDK 默认触发（contextWindow - 16384） */
   _createSettings(model) {
-    return SettingsManager.inMemory({
-      compaction: {
-        enabled: true,
-        reserveTokens: 16384,
-        keepRecentTokens: 20_000,
-      },
-    });
+    return createDefaultSettings();
   }
 }

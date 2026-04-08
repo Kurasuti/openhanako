@@ -1,6 +1,6 @@
 {
   "name": "hanako",
-  "version": "0.80.14",
+  "version": "0.91.9",
   "type": "module",
   "description": "Hanako - a personal AI agent with memory and soul",
   "license": "Apache-2.0",
@@ -42,11 +42,17 @@
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language-data": "^6.5.2",
+    "@floating-ui/dom": "^1.7.6",
     "@hono/node-server": "^1.19.11",
     "@hono/node-ws": "^1.3.0",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@mariozechner/pi-coding-agent": "0.64.0",
     "@sinclair/typebox": "^0.34.0",
+    "@tiptap/core": "^3.22.0",
+    "@tiptap/extension-placeholder": "^3.22.0",
+    "@tiptap/pm": "^3.22.0",
+    "@tiptap/react": "^3.22.0",
+    "@tiptap/starter-kit": "^3.22.0",
     "@traptitech/markdown-it-katex": "^3.6.0",
     "better-sqlite3": "^12.6.2",
     "chokidar": "^5.0.0",
@@ -59,6 +65,7 @@
     "katex": "^0.16.39",
     "mammoth": "^1.11.0",
     "markdown-it": "^14.1.1",
+    "markdown-it-task-lists": "^2.1.1",
     "node-telegram-bot-api": "^0.67.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
@@ -111,6 +118,10 @@
       {
         "from": "dist-server/${os}-${arch}/",
         "to": "server/"
+      },
+      {
+        "from": "desktop/src/screenshot-themes/",
+        "to": "screenshot-themes/"
       }
     ],
     "afterSign": "./scripts/notarize.cjs",

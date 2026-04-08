@@ -14,6 +14,7 @@ export interface ToolCall {
   args?: Record<string, unknown>;
   done: boolean;
   success: boolean;
+  details?: { card?: import('../types').PluginCardDetails; [key: string]: unknown };
 }
 
 // ── 用户附件 ──
@@ -44,7 +45,8 @@ export type ContentBlock =
   | { type: 'browser_screenshot'; base64: string; mimeType: string }
   | { type: 'skill'; skillName: string; skillFilePath: string }
   | { type: 'cron_confirm'; jobData: Record<string, unknown>; status: 'pending' | 'approved' | 'rejected' }
-  | { type: 'settings_confirm'; confirmId: string; settingKey: string; cardType: 'toggle' | 'list' | 'text'; currentValue: string; proposedValue: string; options?: string[]; optionLabels?: Record<string, string>; label: string; description?: string; frontend?: boolean; status: 'pending' | 'confirmed' | 'rejected' | 'timeout' };
+  | { type: 'settings_confirm'; confirmId: string; settingKey: string; cardType: 'toggle' | 'list' | 'text'; currentValue: string; proposedValue: string; options?: string[]; optionLabels?: Record<string, string>; label: string; description?: string; frontend?: boolean; status: 'pending' | 'confirmed' | 'rejected' | 'timeout' }
+  | { type: 'plugin_card'; card: import('../types').PluginCardDetails };
 
 // ── 消息 ──
 
@@ -57,6 +59,7 @@ export interface ChatMessage {
   quotedText?: string;
   attachments?: UserAttachment[];
   deskContext?: DeskContext | null;
+  skills?: string[];
   // Assistant
   blocks?: ContentBlock[];
   // 通用

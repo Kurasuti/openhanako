@@ -44,9 +44,10 @@ export class AgentManager {
     this._d = deps;
     this._agents = new Map();
     this._activeAgentId = null;
-    this._switching = false;
+    this._switchQueue = Promise.resolve();
     this._activityStores = new Map();
     this._agentListCache = null;       // { raw: [{id,name,yuan,identity}], ts: number }
+    this._descRefreshPending = false;
   }
 
   /** 清除 listAgents 缓存（agent 增删改时调用） */
@@ -55,7 +56,7 @@ export class AgentManager {
   get agents() { return this._agents; }
   get activeAgentId() { return this._activeAgentId; }
   set activeAgentId(id) { this._activeAgentId = id; }
-  get switching() { return this._switching; }
+  get switching() { return this._switchQueue !== Promise.resolve(); }
 
   /** 当前焦点 agent */
   get agent() { return this._agents.get(this._activeAgentId); }
@@ -111,16 +112,11 @@ export class AgentManager {
       const results = await Promise.allSettled(others.map(id => initOne(id)));
       for (let i = 0; i < results.length; i++) {
         if (results[i].status === "rejected") {
-          log.error(`agent "${others[i]}" init 失败: ${results[i].reason?.message}`);
+          console.error(`[agent-manager] agent "${others[i]}" init 失败: ${results[i].reason?.message}`);
         }
       }
     }
     log(`[init] ${this._agents.size} 个 agent 初始化完成`);
-
-    // 异步刷新所有 agent 的 description（fire-and-forget，不阻塞启动）
-    for (const id of this._agents.keys()) {
-      this._refreshDescription(id).catch(() => {});
-    }
   }
 
   // ── List ──
@@ -150,6 +146,18 @@ export class AgentManager {
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       });
     }
+
+    // lazy refresh：在返回列表后，异步刷新缺少 description 的 agent（每次最多 1 个）
+    if (!this._descRefreshPending) {
+      const needsRefresh = agents.find(a => !this._hasDescription(a.id));
+      if (needsRefresh) {
+        this._descRefreshPending = true;
+        this._refreshDescription(needsRefresh.id)
+          .catch(() => {})
+          .finally(() => { this._descRefreshPending = false; });
+      }
+    }
+
     return agents;
   }
 
@@ -175,16 +183,29 @@ export class AgentManager {
           const avatarFiles = fs.readdirSync(avatarDir);
           hasAvatar = avatarFiles.some(f => /\.(png|jpe?g|gif|webp)$/i.test(f));
         } catch {}
+        const chatRef = cfg.models?.chat;
+        const chatModel = typeof chatRef === "object"
+          ? { id: chatRef.id, provider: chatRef.provider }
+          : (chatRef ? { id: chatRef } : null);
         agents.push({
           id: entry.name,
           name: cfg.agent?.name || entry.name,
           yuan: cfg.agent?.yuan || "hanako",
           identity,
           hasAvatar,
+          chatModel,
         });
       } catch {}
     }
     return agents;
+  }
+
+  /** 检查 description.md 是否存在 */
+  _hasDescription(agentId) {
+    try {
+      fs.accessSync(path.join(this._d.agentsDir, agentId, "description.md"));
+      return true;
+    } catch { return false; }
   }
 
   /**
@@ -312,7 +333,7 @@ export class AgentManager {
     // 注入 DM 回调
     const dmRouter = hub?.dmRouter;
     if (dmRouter) {
-      ag._dmSentHandler = (fromId, toId) => dmRouter.handleNewDm(fromId, toId);
+      ag.setDmSentHandler((fromId, toId) => dmRouter.handleNewDm(fromId, toId));
     }
 
     this.invalidateAgentListCache();
@@ -322,18 +343,38 @@ export class AgentManager {
 
   // ── Switch ──
 
+  /**
+   * 仅切换 agent 指针（不创建 session）。排队执行，不会并发。
+   * SessionCoordinator.switchSession 跨 agent 时调用此方法。
+   */
   async switchAgentOnly(agentId) {
-    if (this._switching) throw new Error(t("error.agentSwitching"));
+    return this._enqueueSwitch(() => this._doSwitchAgentOnly(agentId));
+  }
+
+  /**
+   * 完整切换：切 agent 指针 + 恢复调度 + 同步 skills + 创建 session。
+   * 排队执行，快速连续切换会按序落到最终目标。
+   */
+  async switchAgent(agentId) {
+    return this._enqueueSwitch(() => this._doSwitchAgent(agentId));
+  }
+
+  /** Promise 链互斥：所有切换操作排队执行，前一个失败不阻塞后续 */
+  _enqueueSwitch(fn) {
+    const queued = this._switchQueue.catch(() => {}).then(fn);
+    this._switchQueue = queued;
+    return queued;
+  }
+
+  async _doSwitchAgentOnly(agentId) {
     if (!this._agents.has(agentId)) {
       throw new Error(t("error.agentNotFound", { id: agentId }));
     }
-    this._switching = true;
     const prevAgentId = this._activeAgentId;
     log.log(`switching agent to ${agentId}`);
     try {
       const hub = this._d.getHub();
       await hub?.pauseForAgentSwitch();
-      // Phase 1: 不再杀 session，只切 agent 指针
       clearConfigCache();
       this._activeAgentId = agentId;
 
@@ -348,34 +389,23 @@ export class AgentManager {
         }
         models.defaultModel = model;
       }
-      // 未配 models.chat 的 agent 继承当前 defaultModel
       const effectiveModel = preferredId || models.defaultModel?.id || "inherited";
       log.log(`agent switched to ${this.agent.agentName} (${agentId}), model=${effectiveModel}`);
     } catch (err) {
       this._activeAgentId = prevAgentId;
       try { this._d.getHub()?.resumeAfterAgentSwitch(); } catch {}
       throw err;
-    } finally {
-      this._switching = false;
     }
   }
 
-  async switchAgent(agentId) {
-    // switchAgentOnly 内部有 _switching 锁，但 createSession 不在锁范围内
-    // 用额外的 _switchingFull 标志保护整个流程，防止快速连续切换导致 session 用错 agent 配置
-    if (this._switchingFull) throw new Error(t("error.agentSwitching"));
-    this._switchingFull = true;
-    try {
-      await this.switchAgentOnly(agentId);
-      const hub = this._d.getHub();
-      hub?.resumeAfterAgentSwitch();
-      this._d.getSkills().syncAgentSkills(this.agent);
-      this._d.getPrefs().savePrimaryAgent(agentId);
-      await this._d.getSessionCoordinator().createSession();
-      log.log(`已切换到助手: ${this.agent.agentName} (${agentId})`);
-    } finally {
-      this._switchingFull = false;
-    }
+  async _doSwitchAgent(agentId) {
+    await this._doSwitchAgentOnly(agentId);
+    const hub = this._d.getHub();
+    hub?.resumeAfterAgentSwitch();
+    this._d.getSkills().syncAgentSkills(this.agent);
+    this._d.getPrefs().savePrimaryAgent(agentId);
+    await this._d.getSessionCoordinator().createSession();
+    log.log(`已切换到助手: ${this.agent.agentName} (${agentId})`);
   }
 
   async createSessionForAgent(agentId, cwd, memoryEnabled = true) {
@@ -487,22 +517,38 @@ export class AgentManager {
       agentsDir: this._d.agentsDir,
       searchConfigResolver: () => this._d.getSearchConfig(),
     });
-    ag._getOwnerIds = getOwnerIds;
-    ag._engine = this._d.getEngine?.() || null;
-    ag._onInstallCallback = async (skillName) => {
+    ag.setGetOwnerIds(getOwnerIds);
+    // 回调注入：Agent 通过 _cb 访问 Engine 能力，不直接持有 Engine 引用
+    const getEngine = () => this._d.getEngine?.();
+    ag.setCallbacks({
+      emitDevLog:           (text, level) => getEngine()?.emitDevLog?.(text, level),
+      getConfirmStore:      () => getEngine()?.confirmStore ?? null,
+      getCurrentSessionPath:() => getEngine()?.currentSessionPath ?? null,
+      emitEvent:            (event, sp) => getEngine()?._emitEvent?.(event, sp),
+      emitSessionEvent:     (event) => getEngine()?.emitSessionEvent?.(event),
+      getDeferredResults:   () => getEngine()?.deferredResults ?? null,
+      executeIsolated:      (prompt, opts) => getEngine()?.executeIsolated(prompt, opts),
+      getCurrentModelId:    () => getEngine()?.currentModel?.id ?? null,
+      getSkillsDir:         () => getEngine()?.skillsDir ?? null,
+      getLearnSkills:       () => getEngine()?.getLearnSkills?.() ?? {},
+      resolveUtilityConfig: () => getEngine()?.resolveUtilityConfig?.(),
+      getCwd:               () => getEngine()?.cwd ?? "",
+      getEngine,  // update-settings-tool 和 ask-agent-tool 仍需要完整 engine
+    });
+    ag.setOnInstallCallback(async (skillName) => {
       const skills = this._d.getSkills();
       await skills.reload(this._d.getResourceLoader?.(), this._agents);
       const enabled = new Set(ag.config?.skills?.enabled || []);
       enabled.add(skillName);
       ag.updateConfig({ skills: { enabled: [...enabled] } });
       skills.syncAgentSkills(ag);
-    };
-    ag._notifyHandler = (title, body) => {
+    });
+    ag.setNotifyHandler((title, body) => {
       this._d.getHub()?.eventBus?.emit({ type: "notification", title, body }, null);
-    };
-    ag._descriptionRefreshHandler = () => {
+    });
+    ag.setDescriptionRefreshHandler(() => {
       this._refreshDescription(path.basename(ag.agentDir)).catch(() => {});
-    };
+    });
     return ag;
   }
 

@@ -16,10 +16,10 @@ export const TOOL_ARG_SUMMARY_KEYS = [
   "key", "value", "action", "type", "schedule", "prompt", "label",
 ];
 
-/** 从文本中提取并剥离 <think>...</think> 标签 */
+/** 从文本中提取并剥离 <think>/<thinking> 标签 */
 export function stripThinkTags(raw) {
   const thinkParts = [];
-  const text = raw.replace(/<think>([\s\S]*?)<\/think>\n*/g, (_, inner) => {
+  const text = raw.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>\n*/g, (_, inner) => {
     thinkParts.push(inner.trim());
     return "";
   });

@@ -238,6 +238,9 @@ export async function createNewSession(): Promise<void> {
   const currentState = useStore.getState();
   loadDeskFiles('', currentState.selectedFolder || currentState.homeFolder || undefined);
 
+  // pending 状态下刷新 model 列表，让 ModelSelector 显示 agent Chat 默认 model
+  loadModels();
+
   useStore.getState().requestInputFocus();
 }
 
@@ -308,6 +311,9 @@ export async function ensureSession(): Promise<boolean> {
     window.dispatchEvent(new CustomEvent('hana-plan-mode', { detail: { enabled: data.planMode ?? false } }));
 
     await loadSessions();
+
+    // 刷新模型列表：session 创建后 activeModel 已绑定，需要同步到 UI
+    loadModels();
 
     // updateFolderButton — no-op (React-driven)
 

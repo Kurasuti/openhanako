@@ -54,6 +54,7 @@ export function createSessionsRoute(engine) {
       const allMessages = [];
       const fileOutputs = [];
       const artifacts = [];
+      const cards = [];
       let globalIdx = 0;
 
       for (const m of sourceMessages) {
@@ -86,6 +87,9 @@ export function createSessionsRoute(engine) {
               language: d.language,
             });
           }
+          if (d.card && d.card.pluginId) {
+            cards.push({ afterIndex: allMessages.length - 1, card: d.card });
+          }
         }
       }
 
@@ -94,6 +98,7 @@ export function createSessionsRoute(engine) {
       let hasMore = false;
       let slicedFileOutputs = fileOutputs;
       let slicedArtifacts = artifacts;
+      let slicedCards = cards;
 
       const total = allMessages.length;
       // all=1 强制全量返回（流式恢复等特殊场景）
@@ -115,6 +120,9 @@ export function createSessionsRoute(engine) {
         slicedArtifacts = artifacts
           .filter(a => a.afterIndex >= startIdx && a.afterIndex < endIdx)
           .map(a => ({ ...a, afterIndex: a.afterIndex - startIdx }));
+        slicedCards = cards
+          .filter(cd => cd.afterIndex >= startIdx && cd.afterIndex < endIdx)
+          .map(cd => ({ ...cd, afterIndex: cd.afterIndex - startIdx }));
       }
 
       // 从历史中提取最新 todo 状态
@@ -127,7 +135,7 @@ export function createSessionsRoute(engine) {
         }
       }
 
-      return c.json({ messages, todos, fileOutputs: slicedFileOutputs, artifacts: slicedArtifacts, hasMore });
+      return c.json({ messages, todos, fileOutputs: slicedFileOutputs, artifacts: slicedArtifacts, cards: slicedCards, hasMore });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }
@@ -215,8 +223,8 @@ export function createSessionsRoute(engine) {
         browserRunning: bm.isRunning,
         browserUrl: bm.currentUrl || null,
         isStreaming: engine.isSessionStreaming(engine.currentSessionPath),
-        currentModelId: engine.currentModel?.id || null,
-        currentModelProvider: engine.currentModel?.provider || null,
+        currentModelId: (engine.activeSessionModel ?? engine.currentModel)?.id || null,
+        currentModelProvider: (engine.activeSessionModel ?? engine.currentModel)?.provider || null,
       });
     } catch (err) {
       const errDetail = `${err.message}\n${err.stack || ""}`;

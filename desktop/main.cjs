@@ -13,6 +13,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, execFileSync } = require("child_process");
 const fs = require("fs");
+const { pathToFileURL } = require("url");
 const { initAutoUpdater, checkForUpdatesAuto, setMainWindow: setUpdaterMainWindow, setUpdateChannel, getState: getUpdateState } = require("./auto-updater.cjs");
 const { wrapIpcHandler, wrapIpcOn } = require('./ipc-wrapper.cjs');
 
@@ -239,6 +240,37 @@ function hasExistingConfig() {
   return false;
 }
 
+/**
+ * 一次性迁移：为 onboarding 功能上线前的老用户补写 setupComplete 标记。
+ * 判断依据：agents/ 下存在至少一个含 config.yaml 的目录 → 用户配置过 agent → 老用户。
+ * 补写后后续启动直接走 isSetupComplete() 快速路径，不再弹任何 onboarding 窗口。
+ */
+function migrateSetupComplete() {
+  if (isSetupComplete()) return;
+  // 判断依据：added-models.yaml 存在且含有真实 api_key → 老用户配置过 provider。
+  // 不能只看 agents/*/config.yaml 是否存在，因为 ensureFirstRun 会为全新用户
+  // 播种默认 agent（含 config.yaml），导致新用户被误判为老用户而跳过 onboarding。
+  try {
+    const modelsPath = path.join(hanakoHome, "added-models.yaml");
+    if (!fs.existsSync(modelsPath)) return;
+    const content = fs.readFileSync(modelsPath, "utf-8");
+    if (!/api_key:\s*["']?[^"'\s]+/.test(content)) return;
+  } catch {
+    return;
+  }
+  const prefsPath = path.join(hanakoHome, "user", "preferences.json");
+  try {
+    let prefs = {};
+    try { prefs = JSON.parse(fs.readFileSync(prefsPath, "utf-8")); } catch {}
+    prefs.setupComplete = true;
+    fs.mkdirSync(path.dirname(prefsPath), { recursive: true });
+    fs.writeFileSync(prefsPath, JSON.stringify(prefs, null, 2) + "\n", "utf-8");
+    console.log("[desktop] 检测到老用户（已有 agent 配置），自动补写 setupComplete");
+  } catch (err) {
+    console.error("[desktop] migrateSetupComplete failed:", err);
+  }
+}
+
 // ── 启动 Server ──
 // 收集 server 的 stdout/stderr 用于崩溃诊断
 let _serverLogs = [];
@@ -296,23 +328,31 @@ async function startServer() {
     })();
 
     if (pidAlive) {
-      // PID 存活，尝试 health check
-      let reused = false;
-      try {
-        const res = await fetch(`http://127.0.0.1:${existingInfo.port}/api/health`, {
-          headers: { Authorization: `Bearer ${existingInfo.token}` },
-          signal: AbortSignal.timeout(2000),
-        });
-        if (res.ok) {
-          console.log(`[desktop] 复用已运行的 server，端口: ${existingInfo.port}`);
-          serverPort = existingInfo.port;
-          serverToken = existingInfo.token;
-          reusedServerPid = existingInfo.pid;
-          reused = true;
-        }
-      } catch { /* health check 网络抖动，继续 kill 旧 server */ }
+      // 版本校验：server-info 中的 version 必须与当前 app 版本一致，
+      // 否则是更新后残存的旧 server，必须杀掉重启
+      const currentVersion = app.getVersion();
+      const serverVersion = existingInfo.version;
+      if (serverVersion && serverVersion !== currentVersion) {
+        console.log(`[desktop] 旧 server 版本不匹配（server: ${serverVersion}, app: ${currentVersion}），终止旧 server`);
+      } else {
+        // PID 存活且版本匹配（或无版本字段的老 server），尝试 health check
+        let reused = false;
+        try {
+          const res = await fetch(`http://127.0.0.1:${existingInfo.port}/api/health`, {
+            headers: { Authorization: `Bearer ${existingInfo.token}` },
+            signal: AbortSignal.timeout(2000),
+          });
+          if (res.ok) {
+            console.log(`[desktop] 复用已运行的 server，端口: ${existingInfo.port}, 版本: ${serverVersion || "unknown"}`);
+            serverPort = existingInfo.port;
+            serverToken = existingInfo.token;
+            reusedServerPid = existingInfo.pid;
+            reused = true;
+          }
+        } catch { /* health check 网络抖动，继续 kill 旧 server */ }
 
-      if (reused) return; // 跳过启动
+        if (reused) return; // 跳过启动
+      }
 
       // PID 存活但 health 失败（无响应或异常）：主动 kill，避免双 server 并存
       console.log(`[desktop] 旧 server (PID ${existingInfo.pid}) 无响应，正在终止...`);
@@ -748,6 +788,10 @@ function createMainWindow() {
       editorWindow.destroy();
       editorWindow = null;
     }
+    if (_screenshotWin && !_screenshotWin.isDestroyed()) {
+      _screenshotWin.destroy();
+      _screenshotWin = null;
+    }
   });
 }
 
@@ -832,11 +876,13 @@ function createSettingsWindow(tab, theme) {
 }
 
 // ── Skill 预览 → 主窗口 overlay ──
-function _showSkillViewer(skillInfo) {
+function _showSkillViewer(skillInfo, fromSettings) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("show-skill-viewer", skillInfo);
-    mainWindow.show();
-    mainWindow.focus();
+    if (!fromSettings) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   }
 }
 
@@ -1286,7 +1332,14 @@ async function handleBrowserCommand(cmd, params) {
       }
       _ensureBrowser();
       const wc = _browserWebView.webContents;
-      await wc.loadURL(params.url);
+      const NAV_TIMEOUT = 30000;
+      await Promise.race([
+        wc.loadURL(params.url),
+        new Promise((_, reject) => setTimeout(() => {
+          try { wc.stop(); } catch {}
+          reject(new Error(`Navigation timed out after ${NAV_TIMEOUT / 1000}s: ${params.url}`));
+        }, NAV_TIMEOUT)),
+      ]);
       await _delay(500);
       const snap = await wc.executeJavaScript(SNAPSHOT_SCRIPT);
       return { url: snap.currentUrl, title: snap.title, snapshot: snap.text };
@@ -1553,6 +1606,247 @@ async function checkForUpdates() {
   await checkForUpdatesAuto();
 }
 
+// ── 截图渲染管线 ──
+
+const SCREENSHOT_THEMES = {
+  "solarized-light":         { width: 460 },
+  "solarized-dark":          { width: 460 },
+  "solarized-light-desktop": { width: 880 },
+  "solarized-dark-desktop":  { width: 880 },
+  "sakura-light":            { width: 460 },
+  "sakura-light-desktop":    { width: 880 },
+};
+
+const SCREENSHOT_MAX_SEGMENT = 4000;
+
+let _screenshotWin = null;
+
+function getScreenshotWindow() {
+  if (_screenshotWin && !_screenshotWin.isDestroyed()) return _screenshotWin;
+  _screenshotWin = new BrowserWindow({
+    width: 460, height: 100,
+    show: false, skipTaskbar: true,
+    webPreferences: { offscreen: true, deviceScaleFactor: 2 },
+  });
+  return _screenshotWin;
+}
+
+let _screenshotLock = Promise.resolve();
+
+function withScreenshotLock(fn) {
+  const prev = _screenshotLock;
+  let resolve;
+  _screenshotLock = new Promise(r => { resolve = r; });
+  return prev.then(() => fn().finally(resolve));
+}
+
+function getScreenshotResourcePath(...segments) {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "screenshot-themes", ...segments);
+  }
+  return path.join(__dirname, "src", "screenshot-themes", ...segments);
+}
+
+function buildScreenshotHTML(payload) {
+  const MarkdownIt = require("markdown-it");
+  const md = new MarkdownIt({ html: true, breaks: true, linkify: true, typographer: true });
+  try {
+    const mk = require("@traptitech/markdown-it-katex");
+    md.use(mk);
+  } catch { /* katex not available */ }
+
+  const themeName = payload.theme;
+  const themeConf = SCREENSHOT_THEMES[themeName];
+  if (!themeConf) throw new Error(`Unknown screenshot theme: ${themeName}`);
+
+  const themeCssPath = getScreenshotResourcePath(`${themeName}.css`);
+  const themeCSS = fs.readFileSync(themeCssPath, "utf-8");
+
+  let katexCSS = "";
+  try {
+    const candidates = [
+      require.resolve("katex/dist/katex.min.css"),
+      path.join(__dirname, "node_modules", "katex", "dist", "katex.min.css"),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) { katexCSS = fs.readFileSync(p, "utf-8"); break; }
+    }
+  } catch { /* no katex */ }
+
+  let extraCSS = "";
+  if (themeName.startsWith("sakura-")) {
+    const isDesktop = themeName.endsWith("-desktop");
+    const branchFile = isDesktop ? "sakura-branch-desktop.png" : "sakura-branch-mobile.png";
+    const flowerFile = isDesktop ? "sakura-flower-desktop.png" : "sakura-flower-mobile.png";
+    const branchUrl = pathToFileURL(getScreenshotResourcePath("sakura", branchFile)).href;
+    const flowerUrl = pathToFileURL(getScreenshotResourcePath("sakura", flowerFile)).href;
+    extraCSS = `:root { --sakura-branch-url: url('${branchUrl}'); --sakura-flower-url: url('${flowerUrl}'); }`;
+  }
+
+  // Logo 内联为 base64 data URL（asar 内文件无法被离屏窗口的 file:// 加载）
+  let logoUrl = "";
+  try {
+    const logoPath = app.isPackaged
+      ? path.join(__dirname, "src", "assets", "Hanako.png")
+      : path.join(__dirname, "src", "assets", "Hanako.png");
+    const logoBuf = fs.readFileSync(logoPath);
+    logoUrl = `data:image/png;base64,${logoBuf.toString("base64")}`;
+  } catch { /* logo 加载失败时水印无图 */ }
+
+  function renderBlock(b) {
+    if (b.type === "html") return b.content;
+    if (b.type === "markdown") return md.render(b.content);
+    if (b.type === "image") return `<img src="${b.content}" class="chat-image" />`;
+    return "";
+  }
+
+  let bodyHTML = "";
+  if (payload.mode === "article" && payload.markdown) {
+    bodyHTML = `<article>${md.render(payload.markdown)}</article>`;
+  } else if (payload.messages) {
+    const parts = [];
+    for (const msg of payload.messages) {
+      const blockHTMLs = msg.blocks.map(renderBlock).join("");
+
+      if (payload.mode === "conversation") {
+        const avatarImg = msg.avatarDataUrl
+          ? `<img class="chat-avatar" src="${msg.avatarDataUrl}" />`
+          : `<div class="chat-avatar chat-avatar-fallback"></div>`;
+        parts.push(`
+          <div class="chat-message">
+            <div class="chat-header">
+              ${avatarImg}
+              <span class="chat-name">${msg.name.replace(/</g, "&lt;")}</span>
+            </div>
+            <div class="chat-body">${blockHTMLs}</div>
+          </div>
+        `);
+      } else {
+        parts.push(blockHTMLs);
+      }
+    }
+    bodyHTML = `<article>${parts.join("")}</article>`;
+  }
+
+  const layoutCSS = `
+    .chat-message { margin-bottom: 1.8em; }
+    .chat-header { display: flex; align-items: center; gap: 0.5em; margin-bottom: 0.5em; }
+    .chat-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+    .chat-avatar-fallback { background: #ddd; }
+    .chat-name { font-size: 0.9em; font-weight: 600; opacity: 0.7; }
+    .chat-body { padding-left: 0; }
+    .chat-body p:last-child { margin-bottom: 0; }
+    .chat-image { max-width: 100%; border-radius: 6px; margin: 0.8em 0; }
+    .watermark {
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.5em; padding: 1.5em 0 1em; opacity: 0.5;
+    }
+    .watermark-logo { width: ${themeName.endsWith("-desktop") ? "28px" : "20px"}; height: ${themeName.endsWith("-desktop") ? "28px" : "20px"}; border-radius: 50%; object-fit: cover; }
+    .watermark-text { font-size: ${themeName.endsWith("-desktop") ? "0.85em" : "0.75em"}; color: #999; letter-spacing: 0.05em; }
+    html, body { scrollbar-width: none; -ms-overflow-style: none; }
+    html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+  `;
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>${katexCSS}</style>
+  <style>${themeCSS}</style>
+  <style>${extraCSS}</style>
+  <style>${layoutCSS}</style>
+</head>
+<body>
+  ${bodyHTML}
+  <footer class="watermark">
+    <img class="watermark-logo" src="${logoUrl}" />
+    <span class="watermark-text">OpenHanako</span>
+  </footer>
+</body>
+</html>`;
+}
+
+async function screenshotCapture(htmlContent, width) {
+  const offscreen = getScreenshotWindow();
+  const scale = 2;
+
+  offscreen.setSize(width, 100);
+
+  const tmpDir = app.getPath("temp");
+  const tmpHtml = path.join(tmpDir, `hana-ss-${Date.now()}.html`);
+  fs.writeFileSync(tmpHtml, htmlContent, "utf-8");
+
+  try {
+    await offscreen.loadURL(pathToFileURL(tmpHtml).href);
+
+    await offscreen.webContents.executeJavaScript(
+      `document.fonts.ready.then(() => true)`
+    );
+    await new Promise(r => setTimeout(r, 300));
+
+    const totalHeight = await offscreen.webContents.executeJavaScript(`
+      Math.max(
+        document.body.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.scrollHeight,
+        document.documentElement.offsetHeight
+      )
+    `);
+
+    let pngBuffer;
+
+    if (totalHeight <= SCREENSHOT_MAX_SEGMENT) {
+      offscreen.setSize(width, totalHeight);
+      await new Promise(r => setTimeout(r, 200));
+      const image = await offscreen.webContents.capturePage();
+      pngBuffer = image.toPNG();
+    } else {
+      const segments = [];
+      let captured = 0;
+      while (captured < totalHeight) {
+        const segH = Math.min(SCREENSHOT_MAX_SEGMENT, totalHeight - captured);
+        offscreen.setSize(width, segH);
+        await offscreen.webContents.executeJavaScript(`window.scrollTo(0, ${captured})`);
+        await new Promise(r => setTimeout(r, 300));
+        const segImage = await offscreen.webContents.capturePage();
+        segments.push(segImage);
+        captured += segH;
+      }
+
+      const actualWidth = width * scale;
+      const actualTotalHeight = totalHeight * scale;
+      const fullBitmap = Buffer.alloc(actualWidth * actualTotalHeight * 4);
+      let yOffset = 0;
+
+      for (const seg of segments) {
+        const bitmap = seg.toBitmap();
+        const size = seg.getSize();
+        const partHeight = size.height;
+        const partRowBytes = size.width * 4;
+        for (let row = 0; row < partHeight; row++) {
+          bitmap.copy(
+            fullBitmap,
+            (yOffset + row) * actualWidth * 4,
+            row * partRowBytes,
+            row * partRowBytes + Math.min(partRowBytes, actualWidth * 4)
+          );
+        }
+        yOffset += partHeight;
+      }
+
+      const fullImage = nativeImage.createFromBitmap(fullBitmap, {
+        width: actualWidth,
+        height: actualTotalHeight,
+      });
+      pngBuffer = fullImage.toPNG();
+    }
+
+    return pngBuffer;
+  } finally {
+    try { fs.unlinkSync(tmpHtml); } catch {}
+  }
+}
+
 // ── IPC ──
 wrapIpcHandler("get-server-port", () => serverPort);
 wrapIpcHandler("get-server-token", () => serverToken);
@@ -1761,6 +2055,18 @@ wrapIpcHandler("select-folder", async (event) => {
   return result.filePaths[0];
 });
 
+// 选择附件文件（多选，支持文件和文件夹）
+wrapIpcHandler("select-files", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win) return [];
+  const result = await dialog.showOpenDialog(win, {
+    properties: ["openFile", "openDirectory", "multiSelections"],
+    title: mt("dialog.selectFiles", null, "Select Files"),
+  });
+  if (result.canceled || !result.filePaths.length) return [];
+  return result.filePaths;
+});
+
 // 选择技能文件/文件夹（支持 .zip / .skill / 文件夹）
 wrapIpcHandler("select-skill", async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
@@ -1795,6 +2101,8 @@ wrapIpcHandler("select-plugin", async (event) => {
 // ── Skill 预览窗口 IPC ──
 wrapIpcHandler("open-skill-viewer", (_event, data) => {
   if (!data) return;
+  const fromSettings = settingsWindow && !settingsWindow.isDestroyed()
+    && _event.sender === settingsWindow.webContents;
 
   // .skill / .zip 文件 → 优先查找已安装目录，否则解压临时目录
   if (data.skillPath && path.isAbsolute(data.skillPath)) {
@@ -1805,7 +2113,7 @@ wrapIpcHandler("open-skill-viewer", (_event, data) => {
       // 先检查同名 skill 是否已安装在 skills 目录
       const installedDir = path.join(hanakoHome, "skills", baseName);
       if (fs.existsSync(path.join(installedDir, "SKILL.md"))) {
-        _showSkillViewer({ name: baseName, baseDir: installedDir, installed: false });
+        _showSkillViewer({ name: baseName, baseDir: installedDir, installed: false }, fromSettings);
         return;
       }
 
@@ -1843,7 +2151,7 @@ wrapIpcHandler("open-skill-viewer", (_event, data) => {
         const nameMatch = fmMatch?.[1]?.match(/^name:\s*(.+)$/m);
         const name = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, "") : baseName;
 
-        _showSkillViewer({ name, baseDir: skillDir, installed: false });
+        _showSkillViewer({ name, baseDir: skillDir, installed: false }, fromSettings);
       } catch (err) {
         console.error("[skill-viewer] Failed to extract .skill file:", err.message);
       }
@@ -1852,7 +2160,7 @@ wrapIpcHandler("open-skill-viewer", (_event, data) => {
   }
 
   if (!data.baseDir || !path.isAbsolute(data.baseDir)) return;
-  _showSkillViewer(data);
+  _showSkillViewer(data, fromSettings);
 });
 
 wrapIpcHandler("skill-viewer-list-files", (_event, baseDir) => {
@@ -1952,6 +2260,52 @@ wrapIpcHandler("write-file", (_event, filePath, content) => {
   } catch { return false; }
 });
 
+// 写入二进制文件（截图用）— 支持 ~ 开头路径
+wrapIpcHandler("write-file-binary", (_event, filePath, base64Data) => {
+  if (!filePath) return false;
+  const resolved = filePath.startsWith("~")
+    ? path.join(os.homedir(), filePath.slice(1))
+    : filePath;
+  if (!path.isAbsolute(resolved)) return false;
+  try {
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, Buffer.from(base64Data, "base64"));
+    return true;
+  } catch { return false; }
+});
+
+wrapIpcHandler("screenshot-render", (_event, payload) => {
+  return withScreenshotLock(async () => {
+    try {
+      const themeConf = SCREENSHOT_THEMES[payload.theme];
+      if (!themeConf) return { success: false, error: `Unknown theme: ${payload.theme}` };
+
+      const htmlContent = buildScreenshotHTML(payload);
+      const pngBuffer = await screenshotCapture(htmlContent, themeConf.width);
+
+      // preview 模式：返回 base64 不存文件
+      if (payload.preview) {
+        return { success: true, base64: pngBuffer.toString("base64") };
+      }
+
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const base = payload.saveDir || path.join(os.homedir(), "Desktop");
+      const dir = path.join(base, "截图");
+      const filePath = path.join(dir, `hanako-${timestamp}.png`);
+
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(filePath, pngBuffer);
+
+      return { success: true, filePath };
+    } catch (err) {
+      console.error("[screenshot-render]", err);
+      return { success: false, error: err.message || String(err) };
+    }
+  });
+});
+
 // 文件监听（artifact 编辑 — 外部变更刷新用）
 const _fileWatchers = new Map();
 wrapIpcHandler("watch-file", (event, filePath) => {
@@ -1962,12 +2316,17 @@ wrapIpcHandler("watch-file", (event, filePath) => {
     _fileWatchers.delete(filePath);
   }
   try {
+    let debounceTimer = null;
     const watcher = fs.watch(filePath, { persistent: false }, (eventType) => {
       if (eventType === "change") {
-        const win = BrowserWindow.fromWebContents(event.sender);
-        if (win && !win.isDestroyed()) {
-          win.webContents.send("file-changed", filePath);
-        }
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          debounceTimer = null;
+          const win = BrowserWindow.fromWebContents(event.sender);
+          if (win && !win.isDestroyed()) {
+            win.webContents.send("file-changed", filePath);
+          }
+        }, 50);
       }
     });
     _fileWatchers.set(filePath, watcher);
@@ -2157,6 +2516,7 @@ app.whenReady().then(async () => {
     }
 
     // 4. 检测是否需要 onboarding
+    migrateSetupComplete();
     if (isSetupComplete()) {
       // 已完成配置：直接创建主窗口
       createMainWindow();
@@ -2238,13 +2598,16 @@ async function shutdownServer() {
       try { serverProcess.kill("SIGTERM"); } catch {}
     }
     await new Promise((resolve) => {
+      let resolved = false;
+      const done = () => { if (!resolved) { resolved = true; resolve(); } };
       const timeout = setTimeout(() => {
         if (serverProcess && !serverProcess.killed) {
           try { serverProcess.kill(); } catch {}
         }
-        resolve();
+        // 强杀后仍等 exit 事件（最多再等 3s），让 OS 释放文件句柄
+        setTimeout(done, 3000);
       }, 5000);
-      serverProcess.on("exit", () => { clearTimeout(timeout); resolve(); });
+      serverProcess.on("exit", () => { clearTimeout(timeout); done(); });
     });
     serverProcess = null;
   } else if (reusedServerPid) {
@@ -2266,6 +2629,8 @@ async function shutdownServer() {
     killPid(reusedServerPid, true);
     reusedServerPid = null;
   }
+  // 清理 server-info.json，防止更新后新版 Electron 误连旧 server
+  try { fs.unlinkSync(path.join(hanakoHome, "server-info.json")); } catch {}
 }
 
 app.on("before-quit", async (event) => {

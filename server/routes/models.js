@@ -24,6 +24,7 @@ export function createModelsRoute(engine) {
     try {
       const overrides = engine.config?.models?.overrides;
       const cur = engine.currentModel;
+      const activeModel = engine.activeSessionModel;
       const models = engine.availableModels.map(m => ({
         id: m.id,
         name: resolveModelName(m.id, m.name, overrides, m.provider),
@@ -34,7 +35,11 @@ export function createModelsRoute(engine) {
         contextWindow: m.contextWindow,
         maxTokens: m.maxTokens,
       }));
-      return c.json({ models, current: cur?.id || null });
+      return c.json({
+        models,
+        current: cur?.id || null,
+        activeModel: activeModel ? { id: activeModel.id, provider: activeModel.provider } : null,
+      });
     } catch (err) {
       return c.json({ error: err.message }, 500);
     }

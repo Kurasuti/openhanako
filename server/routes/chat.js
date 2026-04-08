@@ -5,7 +5,7 @@
  * 支持多 session 并发：后台 session 静默运行，只转发当前活跃 session 的事件
  */
 import { Hono } from "hono";
-import { MoodParser, XingParser, ThinkTagParser } from "../../core/events.js";
+import { MoodParser, XingParser, ThinkTagParser, CardParser } from "../../core/events.js";
 import { wsSend, wsParse } from "../ws-protocol.js";
 import { debugLog } from "../../lib/debug-log.js";
 import { t } from "../i18n.js";
@@ -86,6 +86,9 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         thinkTagParser: new ThinkTagParser(),
         moodParser: new MoodParser(),
         xingParser: new XingParser(),
+        cardParser: new CardParser(),
+        _cardHints: [],
+        _cardEmitted: false,
         isThinking: false,
         hasOutput: false,
         hasToolCall: false,
@@ -163,8 +166,37 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
 
   // 单订阅：事件只写入一次，再按需广播到所有连接中的客户端。
   hub.subscribe((event, sessionPath) => {
+    // Non-session-scoped events: handle before session resolution
+    if (event.type === "plugin_ui_changed") {
+      broadcast({ type: "plugin_ui_changed" });
+      return;
+    }
+
     const isActive = sessionPath === engine.currentSessionPath;
     const ss = sessionPath ? getState(sessionPath) : null;
+
+    // Helper: feed CardParser, emit card events or pass text through as text_delta
+    const feedCardPipeline = (text) => {
+      ss.cardParser.feed(text, (cEvt) => {
+        switch (cEvt.type) {
+          case "text":
+            ss.titlePreview += cEvt.data || "";
+            emitStreamEvent(sessionPath, ss, { type: "text_delta", delta: cEvt.data });
+            maybeGenerateFirstTurnTitle(sessionPath, ss);
+            break;
+          case "card_start":
+            ss._cardEmitted = true;
+            emitStreamEvent(sessionPath, ss, { type: "card_start", attrs: cEvt.attrs });
+            break;
+          case "card_text":
+            emitStreamEvent(sessionPath, ss, { type: "card_text", delta: cEvt.data });
+            break;
+          case "card_end":
+            emitStreamEvent(sessionPath, ss, { type: "card_end" });
+            break;
+        }
+      });
+    };
 
     if (event.type === "message_update") {
       if (!ss) return;
@@ -198,9 +230,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
                     ss.xingParser.feed(evt.data, (xEvt) => {
                       switch (xEvt.type) {
                         case "text":
-                          ss.titlePreview += xEvt.data || "";
-                          emitStreamEvent(sessionPath, ss, { type: "text_delta", delta: xEvt.data });
-                          maybeGenerateFirstTurnTitle(sessionPath, ss);
+                          feedCardPipeline(xEvt.data);
                           break;
                         case "xing_start":
                           emitStreamEvent(sessionPath, ss, { type: "xing_start", title: xEvt.title });
@@ -267,6 +297,15 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         success: !event.isError,
         details: event.result?.details,
       });
+
+      // Plugin Card: emit directly (same pattern as file_output)
+      if (event.result?.details?.card) {
+        const c = event.result.details.card;
+        emitStreamEvent(sessionPath, ss, {
+          type: "plugin_card",
+          card: { ...c, type: c.type || "iframe", pluginId: c.pluginId || "" },
+        });
+      }
 
       // COMPAT(v0.78): present_files → stage_files, remove after v0.90
       if (event.toolName === "stage_files" || event.toolName === "present_files") {
@@ -411,7 +450,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
             ss.xingParser.feed(evt.data, (xEvt) => {
               switch (xEvt.type) {
                 case "text":
-                  emitStreamEvent(sessionPath, ss, { type: "text_delta", delta: xEvt.data });
+                  feedCardPipeline(xEvt.data);
                   break;
                 case "xing_start":
                   emitStreamEvent(sessionPath, ss, { type: "xing_start", title: xEvt.title });
@@ -447,7 +486,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
           ss.xingParser.feed(evt.data, (xEvt) => {
             switch (xEvt.type) {
               case "text":
-                emitStreamEvent(sessionPath, ss, { type: "text_delta", delta: xEvt.data });
+                feedCardPipeline(xEvt.data);
                 break;
               case "xing_start":
                 emitStreamEvent(sessionPath, ss, { type: "xing_start", title: xEvt.title });
@@ -466,11 +505,24 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       });
       ss.xingParser.flush((xEvt) => {
         if (xEvt.type === "text") {
-          emitStreamEvent(sessionPath, ss, { type: "text_delta", delta: xEvt.data });
+          feedCardPipeline(xEvt.data);
         } else if (xEvt.type === "xing_text") {
           emitStreamEvent(sessionPath, ss, { type: "xing_text", delta: xEvt.data });
         }
       });
+      ss.cardParser.flush((cEvt) => {
+        if (cEvt.type === "text") {
+          emitStreamEvent(sessionPath, ss, { type: "text_delta", delta: cEvt.data });
+        } else if (cEvt.type === "card_text") {
+          emitStreamEvent(sessionPath, ss, { type: "card_text", delta: cEvt.data });
+        } else if (cEvt.type === "card_start") {
+          ss._cardEmitted = true;
+          emitStreamEvent(sessionPath, ss, { type: "card_start", attrs: cEvt.attrs });
+        } else if (cEvt.type === "card_end") {
+          emitStreamEvent(sessionPath, ss, { type: "card_end" });
+        }
+      });
+
 
       // 空回复检测：本轮没有文本输出也没有工具调用，提示用户检查配置
       // 被 abort 的 turn 不弹此提示（用户主动停止 / WS 断开 / 连接超时）
@@ -505,6 +557,9 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
       ss.thinkTagParser.reset();
       ss.moodParser.reset();
       ss.xingParser.reset();
+      ss.cardParser.reset();
+      ss._cardHints = [];
+      ss._cardEmitted = false;
 
       if (isActive) debugLog()?.log("ws", "assistant reply done");
       maybeGenerateFirstTurnTitle(sessionPath, ss);
@@ -519,6 +574,16 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
         tokens: usage?.tokens ?? null,
         contextWindow: usage?.contextWindow ?? null,
         percent: usage?.percent ?? null,
+      });
+    } else if (event.type === "deferred_result") {
+      if (!ss) return;
+      emitStreamEvent(sessionPath, ss, {
+        type: "deferred_result",
+        taskId: event.taskId,
+        status: event.status,
+        result: event.result,
+        reason: event.reason,
+        meta: event.meta,
       });
     }
   });
@@ -691,7 +756,7 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
 
               // 非 vision 模型：静默剥离图片，只发文字。不拦截、不报错。
               // vision 未知（undefined）的模型：放行，让 API 决定。
-              const curModel = engine.currentModel;
+              const curModel = engine.activeSessionModel ?? engine.currentModel;
               if (msg.images?.length && curModel?.vision === false) {
                 msg.images = undefined;
               }
@@ -701,6 +766,11 @@ export function createChatRoute(engine, hub, { upgradeWebSocket }) {
               if (savedImagePaths.length) {
                 const pathNote = savedImagePaths.map(p => `[attached_image: ${p}]`).join("\n");
                 promptText = `${pathNote}\n${promptText}`;
+              }
+              // Skill invocation tags
+              if (msg.skills?.length) {
+                const skillNote = msg.skills.map(s => `[Use skill: ${s}]`).join('\n');
+                promptText = `${skillNote}\n${promptText}`;
               }
               if (!promptText.trim() && msg.images?.length) {
                 promptText = t("error.viewImage");

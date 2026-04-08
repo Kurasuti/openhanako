@@ -29,11 +29,12 @@ import { createExperienceTools } from "../lib/tools/experience.js";
 import { createInstallSkillTool } from "../lib/tools/install-skill.js";
 import { createNotifyTool } from "../lib/tools/notify-tool.js";
 import { createUpdateSettingsTool } from "../lib/tools/update-settings-tool.js";
-import { createAcpxTool } from "../lib/tools/acpx-tool.js";
 import { createSubagentTool } from "../lib/tools/subagent-tool.js";
+import { createCheckDeferredTool } from "../lib/tools/check-deferred-tool.js";
 import { READ_ONLY_BUILTIN_TOOLS } from "./config-coordinator.js";
 import { formatSkillsForPrompt } from "../lib/pi-sdk/index.js";
 import { runCompatChecks } from "../lib/compat/index.js";
+import { getPlatformPromptNote } from "./platform-prompt.js";
 
 export class Agent {
   /**
@@ -92,7 +93,12 @@ export class Agent {
     this._channelTool = null;
     this._browserTool = null;
     this._notifyTool = null;
-    this._acpxTool = null;
+
+    /**
+     * 外部回调注入（由 AgentManager._createAgentInstance 填充）。
+     * Agent 不持有 Engine 引用，所有对 Engine 的需求通过此对象间接访问。
+     */
+    this._cb = null;
   }
 
   // ════════════════════════════
@@ -169,25 +175,42 @@ export class Agent {
 
     log(`  [agent] 4. FactStore + SummaryManager 完成`);
 
-    // utility 模型（允许为空，首次安装时用户尚未配置）
-    this._utilityModel = sharedModels.utility || null;
-    this._memoryModel = sharedModels.utility_large || null;
+    // utility 模型：用户未配置时 fallback 到聊天模型
+    const chatModelRef = this._config.models?.chat || null;
+    const userSetUtility = sharedModels.utility || null;
+    const userSetUtilityLarge = sharedModels.utility_large || null;
+
+    this._utilityModel = userSetUtility || chatModelRef;
+    this._memoryModel = userSetUtilityLarge || chatModelRef;
+
+    if (!userSetUtility && chatModelRef) {
+      console.log(`[agent] utility 模型未配置，使用聊天模型作为工具模型`);
+    }
+    if (!userSetUtilityLarge && chatModelRef) {
+      console.log(`[agent] utility_large 模型未配置，使用聊天模型作为记忆模型`);
+    }
 
     // 预解析记忆模型凭证（统一解析层）
     this._resolvedMemoryModel = null;
     this._memoryModelUnavailableReason = null;
     if (this._memoryModel && resolveModel) {
-      try {
+      if (userSetUtilityLarge) {
+        // 用户明确配置了 utility_large：解析失败直接抛错，不兜底
         this._resolvedMemoryModel = resolveModel(this._memoryModel, this._config);
-      } catch (err) {
-        this._memoryModelUnavailableReason = err.message;
-        console.warn(`[memory] 记忆系统未启动：大工具模型（utility_large）解析失败 — ${err.message}`);
-        this._engine?.emitDevLog?.(`记忆系统未启动：大工具模型解析失败 — ${err.message}`, "error");
+      } else {
+        // fallback 到聊天模型：解析失败则降级，不阻塞启动
+        try {
+          this._resolvedMemoryModel = resolveModel(this._memoryModel, this._config);
+        } catch (err) {
+          this._memoryModelUnavailableReason = err.message;
+          console.warn(`[memory] 聊天模型 fallback 解析失败，记忆系统暂不可用 — ${err.message}`);
+          this._cb?.emitDevLog?.(`记忆系统未启动：聊天模型 fallback 解析失败 — ${err.message}`, "warn");
+        }
       }
     } else if (!this._memoryModel) {
-      this._memoryModelUnavailableReason = "utility_large 未配置";
-      console.warn("[memory] 记忆系统未启动：大工具模型（utility_large）未配置。请在设置中配置 utility_large 模型以启用记忆功能。");
-      this._engine?.emitDevLog?.("记忆系统未启动：大工具模型（utility_large）未配置", "warn");
+      this._memoryModelUnavailableReason = "utility_large 未配置且无聊天模型可 fallback";
+      console.warn("[memory] 记忆系统未启动：utility_large 未配置且无聊天模型可 fallback");
+      this._cb?.emitDevLog?.("记忆系统未启动：未配置工具模型且无聊天模型可 fallback", "warn");
     }
 
     if (this._resolvedMemoryModel) {
@@ -247,23 +270,28 @@ export class Agent {
     );
     this._cronTool = createCronTool(this._cronStore, {
       getAutoApprove: () => this._config?.desk?.cron_auto_approve !== false,
-      confirmStore: this._engine?.confirmStore,
-      emitEvent: (event) => this._engine?._emitEvent(event, this._engine?._sessionCoord?.currentSessionPath),
-      getSessionPath: () => this._engine?._sessionCoord?.currentSessionPath,
+      confirmStore: this._cb?.getConfirmStore?.(),
+      emitEvent: (event) => this._cb?.emitEvent?.(event, this._cb?.getCurrentSessionPath?.()),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
     this._stageFilesTool = createStageFilesTool();
     this._artifactTool = createArtifactTool();
-    this._browserTool = createBrowserTool();
+    this._browserTool = createBrowserTool(() => this._cb?.getCurrentSessionPath?.());
     this._notifyTool = createNotifyTool({
       onNotify: (title, body) => this._notifyHandler?.(title, body),
     });
 
+    this._checkDeferredTool = createCheckDeferredTool({
+      getDeferredStore: () => this._cb?.getDeferredResults?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+    });
+
     // 10. 设置修改工具
     this._updateSettingsTool = createUpdateSettingsTool({
-      getEngine: () => this._engine,
-      getConfirmStore: () => this._engine?.confirmStore,
-      getSessionPath: () => this._engine?.currentSessionPath,
-      emitEvent: (event) => this._engine?.emitSessionEvent(event),
+      getEngine: () => this._cb?.getEngine?.(),
+      getConfirmStore: () => this._cb?.getConfirmStore?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
+      emitEvent: (event) => this._cb?.emitSessionEvent?.(event),
     });
 
     // 9. 频道工具 + 私信工具（需要 channelsDir 和 agentsDir）
@@ -308,6 +336,8 @@ export class Agent {
         } catch { return []; }
       };
 
+      this._listAgents = listAgents;
+
       this._channelTool = createChannelTool({
         channelsDir: this.channelsDir,
         agentsDir: this.agentsDir,
@@ -321,7 +351,9 @@ export class Agent {
       this._askAgentTool = createAskAgentTool({
         agentId,
         listAgents,
-        engine: this._engine,
+        engine: this._cb?.getEngine?.(),
+        getDeferredStore: () => this._cb?.getDeferredResults?.(),
+        getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
       });
 
       this._dmTool = createDmTool({
@@ -335,15 +367,16 @@ export class Agent {
     // 10. install_skill 工具（需要 agentDir + config + engine.resolveUtilityConfig）
     this._installSkillTool = createInstallSkillTool({
       agentDir: this.agentDir,
+      getUserSkillsDir: () => this._cb?.getSkillsDir?.(),
       getConfig: () => {
         const cfg = { ...this._config };
         // learn_skills 从全局 preferences 注入（覆盖 agent config 中的值）
-        const globalLearn = this._engine?.getLearnSkills?.() || {};
+        const globalLearn = this._cb?.getLearnSkills?.() || {};
         if (!cfg.capabilities) cfg.capabilities = {};
         cfg.capabilities = { ...cfg.capabilities, learn_skills: globalLearn };
         return cfg;
       },
-      resolveUtilityConfig: () => this._engine?.resolveUtilityConfig?.(),
+      resolveUtilityConfig: () => this._cb?.resolveUtilityConfig?.(),
       onInstalled: async (skillName) => {
         await this._onInstallCallback?.(skillName);
       },
@@ -352,17 +385,13 @@ export class Agent {
     // 11. subagent 工具
     this._subagentTool = createSubagentTool({
       executeIsolated: (prompt, opts) => {
-        if (!this._engine) throw new Error("subagent 调用失败：engine 未初始化");
-        return this._engine.executeIsolated(prompt, opts);
+        if (!this._cb?.executeIsolated) throw new Error("subagent 调用失败：engine 未初始化");
+        return this._cb.executeIsolated(prompt, opts);
       },
-      resolveUtilityModel: () => this._memoryModel || this._utilityModel || null,
+      resolveUtilityModel: () => this._cb?.getCurrentModelId?.() || null,
       readOnlyBuiltinTools: READ_ONLY_BUILTIN_TOOLS,
-    });
-
-    // ACPX delegate tool (executes external ACPX CLI streams)
-    this._acpxTool = createAcpxTool({
-      getConfig: () => this._engine?.getPreferences?.()?.acpx || {},
-      getCwd: () => this._engine?.homeCwd || this._engine?.cwd || process.cwd(),
+      getDeferredStore: () => this._cb?.getDeferredResults?.(),
+      getSessionPath: () => this._cb?.getCurrentSessionPath?.(),
     });
 
     // 12. 组装 system prompt
@@ -401,6 +430,19 @@ export class Agent {
       cleanup();
     }
   }
+
+  // ════════════════════════════
+  //  外部回调 setter（统一入口，禁止外部直接赋值 _xxx）
+  // ════════════════════════════
+
+  setCallbacks(cb) { this._cb = cb; }
+  setGetOwnerIds(fn) { this._getOwnerIds = fn; }
+  setOnInstallCallback(fn) { this._onInstallCallback = fn; }
+  setNotifyHandler(fn) { this._notifyHandler = fn; }
+  setDescriptionRefreshHandler(fn) { this._descriptionRefreshHandler = fn; }
+  setDmSentHandler(fn) { this._dmSentHandler = fn; }
+  setChannelPostHandler(fn) { this._channelPostHandler = fn; }
+  setUtilityModel(val) { this._utilityModel = val; }
 
   // ════════════════════════════
   //  状态访问
@@ -446,7 +488,7 @@ export class Agent {
       this._notifyTool,
       this._updateSettingsTool,
       this._subagentTool,
-      this._acpxTool,
+      this._checkDeferredTool,
     ].filter(Boolean);
   }
 
@@ -612,6 +654,13 @@ export class Agent {
           : "The following is the user's self-description, manually maintained by the user.\n\n" + userMd
       ),
     ];
+    const platformPrompt = getPlatformPromptNote({ platform: process.platform, isZh });
+    if (platformPrompt) {
+      parts.push(...section(
+        isZh ? "# 平台执行规则" : "# Platform Execution Rules",
+        platformPrompt
+      ));
+    }
     // 记忆整体开关：master && session 都开启才注入记忆相关 prompt
     if (this.memoryEnabled) {
       const memoryRule = isZh ? [
@@ -686,7 +735,7 @@ export class Agent {
 
     // 主动技能获取引导（仅在 allow_github_fetch 开启时注入）
     // learn_skills 从全局 preferences 读取
-    const learnCfg = this._engine?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
+    const learnCfg = this._cb?.getLearnSkills?.() || this._config?.capabilities?.learn_skills || {};
     if (learnCfg.enabled && learnCfg.allow_github_fetch) {
       parts.push(isZh
         ? "\n## 主动技能获取\n\n" +
@@ -720,15 +769,42 @@ export class Agent {
       );
     }
 
+    // 团队协作（仅当存在其他 agent 时注入）
+    if (this._listAgents) {
+      const myId = path.basename(this.agentDir);
+      const allAgents = this._listAgents();
+      const others = allAgents.filter(a => a.id !== myId);
+      if (others.length > 0) {
+        const roster = allAgents.map(a => {
+          const tag = a.id === myId ? "（你）" : "";
+          const model = a.model ? ` [${a.model}]` : "";
+          const desc = a.summary ? ` — ${a.summary}` : "";
+          return `- **${a.name}** (id: ${a.id})${tag}${model}${desc}`;
+        }).join("\n");
+        parts.push(isZh
+          ? `\n## 团队\n\n` +
+            `你不是独自工作。当前环境中有多个 agent，各有不同的专长和模型：\n\n${roster}\n\n` +
+            `遇到明显更适合其他 agent 专长的任务，或需要不同视角审核重要结论时，用 ask_agent 请求协助。` +
+            `先判断这件事自己做合不合适，再决定是否交出去。不确定找谁时传 \`agent="?"\` 查看详情。`
+          : `\n## Team\n\n` +
+            `You are not working alone. Multiple agents are available, each with different strengths and models:\n\n${roster}\n\n` +
+            `When a task clearly falls within another agent's expertise, or when an important conclusion would benefit from a different perspective, use ask_agent to request help. ` +
+            `Judge whether you're the best fit for the job before deciding to delegate. Pass \`agent="?"\` if unsure who to ask.`
+        );
+      }
+    }
+
     // 书桌 = 当前工作目录（注入实际路径）
-    const cwdPath = this._engine?.cwd || "";
+    const cwdPath = this._cb?.getCwd?.() || "";
     parts.push(isZh
       ? `\n## 书桌\n\n` +
         `用户所说的「书桌」「工作空间」指的是你当前的工作目录（cwd），不是系统桌面（~/Desktop）。` +
-        (cwdPath ? `\n当前工作目录：${cwdPath}` : "")
+        (cwdPath ? `\n当前工作目录：${cwdPath}` : "") +
+        `\n用户提到的文件、目录默认在当前工作目录下查找。找不到时再尝试主目录及其他常见位置。`
       : `\n## Desk\n\n` +
         `When the user says "desk" (书桌) or "workspace", they mean your current working directory (cwd), NOT the system Desktop (~/Desktop).` +
-        (cwdPath ? `\nCurrent working directory: ${cwdPath}` : "")
+        (cwdPath ? `\nCurrent working directory: ${cwdPath}` : "") +
+        `\nFiles and directories mentioned by the user should be searched in the current working directory first. Only look in the home directory or other common locations if not found.`
     );
 
     // 日期时间

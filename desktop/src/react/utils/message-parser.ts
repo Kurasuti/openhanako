@@ -121,33 +121,108 @@ export function truncateHead(s: string, max: number): string {
   return s.slice(0, max - 1) + '…';
 }
 
-export function extractToolDetail(name: string, args: Record<string, unknown> | undefined): string {
-  if (!args) return '';
+export interface ToolDetail {
+  text: string;
+  /** 文件路径或 URL，存在时 ToolIndicator 渲染为可点击链接 */
+  href?: string;
+  /** 'file' 用 openFile，'url' 用 openExternal */
+  hrefType?: 'file' | 'url';
+}
+
+export function extractToolDetail(name: string, args: Record<string, unknown> | undefined): ToolDetail {
+  if (!args) return { text: '' };
   switch (name) {
     case 'read':
     case 'write':
     case 'edit':
-    case 'edit-diff':
-      return truncatePath((args.file_path || args.path || '') as string);
+    case 'edit-diff': {
+      const p = (args.file_path || args.path || '') as string;
+      return { text: truncatePath(p), href: p || undefined, hrefType: 'file' };
+    }
     case 'bash':
-      return truncateHead((args.command || '') as string, 40);
+      return { text: truncateHead((args.command || '') as string, 40) };
     case 'glob':
     case 'find':
-      return (args.pattern || '') as string;
+      return { text: (args.pattern || '') as string };
     case 'grep':
-      return truncateHead((args.pattern || '') as string, 30) +
-        (args.path ? ` in ${truncatePath(args.path as string)}` : '');
-    case 'ls':
-      return truncatePath((args.path || '') as string);
-    case 'web_fetch':
-      return extractHostname((args.url || '') as string);
+      return { text: truncateHead((args.pattern || '') as string, 30) +
+        (args.path ? ` in ${truncatePath(args.path as string)}` : '') };
+    case 'ls': {
+      const p = (args.path || '') as string;
+      return { text: truncatePath(p), href: p || undefined, hrefType: 'file' };
+    }
+    case 'web_fetch': {
+      const url = (args.url || '') as string;
+      return { text: extractHostname(url), href: url || undefined, hrefType: 'url' };
+    }
     case 'web_search':
-      return truncateHead((args.query || '') as string, 40);
-    case 'browser':
-      return extractHostname((args.url || '') as string);
+      return { text: truncateHead((args.query || '') as string, 40) };
+    case 'browser': {
+      const url = (args.url || '') as string;
+      return { text: extractHostname(url), href: url || undefined, hrefType: 'url' };
+    }
     case 'search_memory':
-      return truncateHead((args.query || '') as string, 40);
-    default:
-      return '';
+      return { text: truncateHead((args.query || '') as string, 40) };
+    case 'subagent':
+      return { text: truncateHead((args.task || '') as string, 30) };
+    case 'ask_agent':
+      return { text: (args.agent || '') as string };
+    case 'dm':
+      return { text: (args.to || '') as string };
+    case 'channel':
+      return { text: (args.channel || args.name || '') as string };
+    case 'cron':
+      return { text: truncateHead((args.label || args.prompt || '') as string, 30) };
+    case 'notify':
+      return { text: truncateHead((args.title || '') as string, 30) };
+    case 'artifact':
+      return { text: truncateHead((args.title || '') as string, 30) };
+    case 'install_skill':
+      return { text: (args.skill_name || '') as string };
+    case 'update_settings':
+      return { text: (args.key || args.setting || '') as string };
+    default: {
+      // 插件工具：取第一个有意义的字符串参数作详情
+      const first = Object.values(args).find(v => typeof v === 'string' && v.length > 0);
+      return { text: first ? truncateHead(first as string, 30) : '' };
+    }
   }
+}
+
+// ── Card 解析 ──
+
+export interface ParsedCard {
+  type: string;
+  pluginId: string;
+  route: string;
+  title?: string;
+  description: string;
+}
+
+export function parseCardFromContent(text: string | null | undefined): { cards: ParsedCard[]; text: string } {
+  if (!text) return { cards: [], text: '' };
+  const cards: ParsedCard[] = [];
+  const fullRe = /<card((?:\s+[\w-]+="[^"]*")*)\s*>([\s\S]*?)<\/card>/g;
+  let match;
+  while ((match = fullRe.exec(text)) !== null) {
+    const attrStr = match[1];
+    const body = match[2].trim();
+    const attrs: Record<string, string> = {};
+    const attrRe = /([\w-]+)="([^"]*)"/g;
+    let am;
+    while ((am = attrRe.exec(attrStr)) !== null) {
+      attrs[am[1]] = am[2];
+    }
+    cards.push({
+      type: attrs.type || 'iframe',
+      pluginId: attrs.plugin || '',
+      route: attrs.route || '',
+      title: attrs.title || undefined,
+      description: body,
+    });
+  }
+
+  const stripRe = /<card(?:\s+[\w-]+="[^"]*")*\s*>[\s\S]*?<\/card>/g;
+  const remaining = text.replace(stripRe, '').replace(/^\n+/, '').trim();
+  return { cards, text: remaining };
 }

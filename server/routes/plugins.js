@@ -4,6 +4,7 @@ import path from "path";
 import os from "os";
 import { extractZip } from "../../lib/extract-zip.js";
 import { resolveAgent } from "../utils/resolve-agent.js";
+import { fromRoot } from "../../shared/hana-root.js";
 
 /**
  * 代理分发：将 /plugins/:pluginId/* 的请求转发到对应 plugin 子 app。
@@ -56,21 +57,30 @@ export function createPluginProxyRoute(routeRegistry) {
 export function createPluginsRoute(engine) {
   const route = new Hono();
 
-  // ── Management API (specific routes first) ──
-
-  route.get("/plugins", (c) => {
-    const pm = engine.pluginManager;
-    if (!pm) return c.json([]);
-    const source = c.req.query("source"); // ?source=community 或 ?source=builtin
-    let plugins = pm.listPlugins();
-    if (source) plugins = plugins.filter(p => p.source === source);
-    return c.json(plugins.map(p => ({
+  /**
+   * 可见插件过滤 + 序列化（单一出口，所有返回插件列表的端点共用）。
+   * hidden 插件（系统插件）永远不暴露给前端管理页。
+   * @param {object} [opts]
+   * @param {string} [opts.source] - 按 source 过滤（"community" | "builtin"）
+   */
+  function visiblePlugins(pm, opts = {}) {
+    let plugins = pm.listPlugins().filter(p => !p.hidden);
+    if (opts.source) plugins = plugins.filter(p => p.source === opts.source);
+    return plugins.map(p => ({
       id: p.id, name: p.name, version: p.version,
       description: p.description, status: p.status,
       source: p.source || "community", trust: p.trust || "restricted",
       contributions: p.contributions,
       error: p.error || null,
-    })));
+    }));
+  }
+
+  // ── Management API (specific routes first) ──
+
+  route.get("/plugins", (c) => {
+    const pm = engine.pluginManager;
+    if (!pm) return c.json([]);
+    return c.json(visiblePlugins(pm, { source: c.req.query("source") }));
   });
 
   route.get("/plugins/config-schemas", (c) => {
@@ -193,13 +203,56 @@ export function createPluginsRoute(engine) {
       await pm.setFullAccess(allow_full_access);
       engine.syncPluginExtensions();
     }
-    const plugins = pm.listPlugins();
-    return c.json(plugins.map(p => ({
-      id: p.id, name: p.name, version: p.version,
-      description: p.description, status: p.status,
-      source: p.source || "community", trust: p.trust || "restricted",
-      contributions: p.contributions, error: p.error || null,
-    })));
+    return c.json(visiblePlugins(pm, { source: "community" }));
+  });
+
+  // ── Plugin UI panel endpoints ──
+
+  route.get("/plugins/pages", (c) => {
+    const pm = engine.pluginManager;
+    if (!pm) return c.json([]);
+    const pages = pm.getPages().map(p => ({
+      pluginId: p.pluginId,
+      title: p.title,
+      icon: p.icon,
+      routeUrl: `/api/plugins/${p.pluginId}${p.route}`,
+    }));
+    return c.json(pages);
+  });
+
+  route.get("/plugins/widgets", (c) => {
+    const pm = engine.pluginManager;
+    if (!pm) return c.json([]);
+    const widgets = pm.getWidgets().map(w => ({
+      pluginId: w.pluginId,
+      title: w.title,
+      icon: w.icon,
+      routeUrl: `/api/plugins/${w.pluginId}${w.route}`,
+    }));
+    return c.json(widgets);
+  });
+
+  route.get("/plugins/theme.css", (c) => {
+    const theme = c.req.query("theme") || "warm-paper";
+    // Sanitize theme name to prevent path traversal
+    const safeName = path.basename(theme).replace(/[^a-zA-Z0-9_-]/g, "");
+    const candidates = [
+      fromRoot("desktop", "src", "themes", `${safeName}.css`),
+      fromRoot("desktop", "dist-renderer", "themes", `${safeName}.css`),
+    ];
+    const found = candidates.find(p => fs.existsSync(p));
+    if (!found) {
+      c.header("Content-Type", "text/css");
+      return c.body("/* theme not found */");
+    }
+    let css = fs.readFileSync(found, "utf-8");
+    // Flatten selectors for iframe consumption:
+    // [data-theme="xxx"], :root:not([data-theme]) → :root
+    // [data-theme="xxx"] → :root
+    css = css.replace(/\[data-theme="[^"]*"\](?:,\s*:root:not\(\[data-theme\]\))?/g, ":root");
+    c.header("Content-Type", "text/css");
+    c.header("Cache-Control", "public, max-age=300");
+    return c.body(css);
   });
 
   // ── Plugin route proxy (catch-all last) ──

@@ -29,9 +29,22 @@ export async function loadModels(): Promise<void> {
   try {
     const res = await hanaFetch('/api/models');
     const data = await res.json();
-    const currentModelObj = (data.models || []).find((m: any) => m.isCurrent);
+    const { pendingNewSession } = useStore.getState();
+    const activeModel = data.activeModel;
+    let models = data.models || [];
+
+    // 非 pending 状态：用 session 实际绑定的 model 重写 isCurrent 标记
+    // pending 状态：保持 API 返回的 isCurrent（跟 agent Chat model 走）
+    if (!pendingNewSession && activeModel) {
+      models = models.map((m: any) => ({
+        ...m,
+        isCurrent: m.id === activeModel.id && m.provider === activeModel.provider,
+      }));
+    }
+
+    const currentModelObj = models.find((m: any) => m.isCurrent);
     useStore.setState({
-      models: data.models || [],
+      models,
       currentModel: currentModelObj ? { id: currentModelObj.id, provider: currentModelObj.provider } : null,
     });
   } catch { /* silent */ }

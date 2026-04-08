@@ -3,6 +3,7 @@ import { useStore } from '../stores';
 import { usePanel } from '../hooks/use-panel';
 import { hanaFetch, hanaUrl } from '../hooks/use-hana-fetch';
 import { fetchConfig, invalidateConfigCache } from '../hooks/use-config';
+import { loadSessions, switchSession } from '../stores/session-actions';
 import { formatSessionDate, injectCopyButtons, parseMoodFromContent } from '../utils/format';
 import { yuanFallbackAvatar } from '../utils/agent-helpers';
 import { getMd } from '../utils/markdown';
@@ -31,6 +32,7 @@ interface DetailMessage {
 }
 
 interface DetailState {
+  activityId: string;
   title: string;
   agentId: string;
   agentName: string;
@@ -95,6 +97,7 @@ export function ActivityPanel() {
         ? formatSessionDate(new Date(activity.startedAt).toISOString())
         : '';
       setDetail({
+        activityId,
         title: `${typeText}  ${timeStr}`,
         agentId: activity.agentId || currentAgentId || '',
         agentName: activity.agentName || agentName,
@@ -104,6 +107,18 @@ export function ActivityPanel() {
   }, []);
 
   const closeDetail = useCallback(() => setDetail(null), []);
+
+  const promoteActivity = useCallback(async (activityId: string) => {
+    try {
+      const res = await hanaFetch(`/api/desk/activities/${activityId}/promote`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error || !data.sessionPath) return;
+      await loadSessions();
+      await switchSession(data.sessionPath);
+    } catch (err) {
+      console.error('[activity] promote failed:', err);
+    }
+  }, []);
 
   if (!visible) return null;
 
@@ -120,6 +135,17 @@ export function ActivityPanel() {
                 </svg>
               </button>
               <DetailHeader detail={detail} />
+              <button
+                className={fp.actPromoteBtn}
+                onClick={() => promoteActivity(detail.activityId)}
+                title={t('activity.promote')}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="17 11 12 6 7 11" />
+                  <line x1="12" y1="6" x2="12" y2="18" />
+                </svg>
+                <span>{t('activity.promote')}</span>
+              </button>
               <button className={fp.floatingPanelClose} onClick={close}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
