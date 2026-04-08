@@ -30,14 +30,8 @@ import { SkillBadge } from './input/extensions/skill-badge';
 import { serializeEditor } from '../utils/editor-serializer';
 import { useSkillSlashItems } from '../hooks/use-slash-items';
 import {
-<<<<<<< HEAD
-  XING_PROMPT, executeDiary, executeCompact, buildSlashCommands, parseAcpxSlashCommand, executeAcpxSlashCommand,
-  type AcpxProgressEvent,
-  type SlashCommand,
-=======
   XING_PROMPT, executeDiary, executeCompact, buildSlashCommands,
   type SlashItem,
->>>>>>> upstream/main
 } from './input/slash-commands';
 import { attachFilesFromPaths } from '../MainContent';
 import styles from './input/InputArea.module.css';
@@ -52,9 +46,6 @@ export type { SlashItem };
 export function InputArea() {
   return <InputAreaInner />;
 }
-
-const ACPX_LOG_STORAGE_KEY = 'hana-acpx-logs';
-const ACPX_MAX_LOG_SESSIONS = 40;
 
 function InputAreaInner() {
   const { t } = useI18n();
@@ -89,11 +80,6 @@ function InputAreaInner() {
   const [slashSelected, setSlashSelected] = useState(0);
   const [slashBusy, setSlashBusy] = useState<string | null>(null);
   const [slashResult, setSlashResult] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-  const [acpxLogs, setAcpxLogs] = useState<Array<{ id: string; text: string; kind: 'info' | 'stdout' | 'stderr' | 'error' | 'done' }>>([]);
-  const [acpxRunning, setAcpxRunning] = useState(false);
-  const [acpxCollapsed, setAcpxCollapsed] = useState(false);
-  const acpxLogsRef = useRef<Array<{ id: string; text: string; kind: 'info' | 'stdout' | 'stderr' | 'error' | 'done' }>>([]);
-  const acpxAbortRef = useRef<AbortController | null>(null);
 
   const isComposing = useRef(false);
   const [inputText, setInputText] = useState('');
@@ -196,197 +182,10 @@ function InputAreaInner() {
     setTimeout(() => setSlashResult(null), 3000);
   }, []);
 
-  const persistAcpxSession = useCallback((logs: Array<{ id: string; text: string; kind: 'info' | 'stdout' | 'stderr' | 'error' | 'done' }>, collapsed: boolean) => {
-    if (!currentSessionPath) return;
-    try {
-      const raw = localStorage.getItem(ACPX_LOG_STORAGE_KEY);
-      const data = raw ? JSON.parse(raw) : {};
-      if (logs.length === 0) {
-        delete data[currentSessionPath];
-      } else {
-        data[currentSessionPath] = {
-          logs,
-          collapsed,
-          updatedAt: Date.now(),
-        };
-      }
-      const keys = Object.keys(data);
-      if (keys.length > ACPX_MAX_LOG_SESSIONS) {
-        keys
-          .sort((a, b) => (data[b]?.updatedAt || 0) - (data[a]?.updatedAt || 0))
-          .slice(ACPX_MAX_LOG_SESSIONS)
-          .forEach((key) => delete data[key]);
-      }
-      localStorage.setItem(ACPX_LOG_STORAGE_KEY, JSON.stringify(data));
-    } catch {}
-  }, [currentSessionPath]);
-
-  const appendAcpxLog = useCallback((text: string, kind: 'info' | 'stdout' | 'stderr' | 'error' | 'done' = 'info') => {
-    if (!text.trim()) return;
-    setAcpxLogs(prev => {
-      const next = [...prev, { id: `${Date.now()}-${Math.random()}`, text, kind }];
-      acpxLogsRef.current = next;
-      persistAcpxSession(next, acpxCollapsed);
-      return next;
-    });
-  }, [acpxCollapsed, persistAcpxSession]);
-
-  const clearAcpxLogs = useCallback(() => {
-    acpxLogsRef.current = [];
-    setAcpxLogs([]);
-    persistAcpxSession([], acpxCollapsed);
-  }, [acpxCollapsed, persistAcpxSession]);
-
-  const stopAcpxRun = useCallback(() => {
-    if (!acpxAbortRef.current) return;
-    acpxAbortRef.current.abort();
-    acpxAbortRef.current = null;
-    setAcpxRunning(false);
-  }, []);
-
-  const toggleAcpxCollapsed = useCallback(() => {
-    setAcpxCollapsed(prev => {
-      const next = !prev;
-      persistAcpxSession(acpxLogsRef.current, next);
-      return next;
-    });
-  }, [persistAcpxSession]);
-
-  const copyAcpxLogs = useCallback(async () => {
-    const text = acpxLogsRef.current.map(v => v.text).join('\n').trim();
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      showSlashResult(t('slash.acpxCopied'), 'success');
-    } catch {
-      showSlashResult(t('slash.acpxCopyFailed'), 'error');
-    }
-  }, [showSlashResult, t]);
-
-  const appendAcpxSummaryToChat = useCallback(async (
-    args: string[],
-    ok: boolean,
-    errorText: string | null | undefined,
-  ) => {
-    const sessionPath = useStore.getState().currentSessionPath;
-    if (!sessionPath) return;
-    const lines = acpxLogsRef.current.map(v => v.text).filter(Boolean);
-    const status = ok ? t('slash.acpxProgressDone') : (errorText || t('slash.acpxProgressFailed'));
-    const body = [
-      `## ${t('slash.acpxChatTitle')}`,
-      `${t('slash.acpxChatCommand')}: \`/acpx ${args.join(' ')}\``,
-      `${t('slash.acpxChatStatus')}: ${status}`,
-      '',
-      '```text',
-      ...lines,
-      '```',
-    ].join('\n');
-
-    const { renderMarkdown } = await import('../utils/markdown');
-    useStore.getState().appendItem(sessionPath, {
-      type: 'message',
-      data: {
-        id: `assistant-acpx-${Date.now()}`,
-        role: 'assistant',
-        text: body,
-        textHtml: renderMarkdown(body),
-      },
-    });
-  }, [t]);
-
-  const handleAcpxProgress = useCallback((evt: AcpxProgressEvent) => {
-    if (evt.type === 'phase' && evt.message) {
-      appendAcpxLog(evt.message, 'info');
-      return;
-    }
-    if (evt.type === 'start') {
-      appendAcpxLog(`[${evt.source || 'acpx'}] ${evt.command || ''}`.trim(), 'info');
-      return;
-    }
-    if (evt.type === 'stdout' && evt.text) {
-      evt.text.split(/\r?\n/).forEach(line => appendAcpxLog(line, 'stdout'));
-      return;
-    }
-    if (evt.type === 'stderr' && evt.text) {
-      evt.text.split(/\r?\n/).forEach(line => appendAcpxLog(line, 'stderr'));
-      return;
-    }
-    if (evt.type === 'exit') {
-      appendAcpxLog(`${t('slash.acpxExitCode')}: ${evt.exitCode ?? 'null'}`, 'info');
-      return;
-    }
-    if (evt.type === 'done') {
-      if (evt.timedOut) appendAcpxLog('timeout', 'error');
-      if (evt.aborted) appendAcpxLog('aborted', 'error');
-      if (evt.signal) appendAcpxLog(`signal: ${evt.signal}`, 'error');
-      if (evt.ok) appendAcpxLog(t('slash.acpxProgressDone'), 'done');
-      else appendAcpxLog(evt.error || t('slash.acpxProgressFailed'), 'error');
-    }
-  }, [appendAcpxLog, t]);
-
-  useEffect(() => {
-    if (!currentSessionPath) {
-      acpxLogsRef.current = [];
-      setAcpxLogs([]);
-      setAcpxCollapsed(false);
-      return;
-    }
-    try {
-      const raw = localStorage.getItem(ACPX_LOG_STORAGE_KEY);
-      const data = raw ? JSON.parse(raw) : {};
-      const entry = data[currentSessionPath];
-      const logs = Array.isArray(entry?.logs) ? entry.logs : [];
-      const collapsed = !!entry?.collapsed;
-      acpxLogsRef.current = logs;
-      setAcpxLogs(logs);
-      setAcpxCollapsed(collapsed);
-    } catch {
-      acpxLogsRef.current = [];
-      setAcpxLogs([]);
-      setAcpxCollapsed(false);
-    }
-  }, [currentSessionPath]);
-
-  useEffect(() => {
-    const onAcpxToolEvent = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {};
-      const currentPath = useStore.getState().currentSessionPath;
-      if (detail.sessionPath && currentPath && detail.sessionPath !== currentPath) return;
-
-      if (detail.phase === 'start') {
-        setAcpxRunning(false);
-        const args = detail.args || {};
-        const head = ['Agent tool: acpx'];
-        if (args.target) head.push(String(args.target));
-        if (args.mode) head.push(String(args.mode));
-        appendAcpxLog(head.join(' '), 'info');
-        if (args.task) appendAcpxLog(String(args.task), 'info');
-        return;
-      }
-
-      if (detail.phase === 'end') {
-        setAcpxRunning(false);
-        const d = detail.details || {};
-        const stdout = String(d.stdout || '').trim();
-        const stderr = String(d.stderr || '').trim();
-        if (stdout) stdout.split(/\r?\n/).forEach((line: string) => appendAcpxLog(line, 'stdout'));
-        if (stderr) stderr.split(/\r?\n/).forEach((line: string) => appendAcpxLog(line, 'stderr'));
-        appendAcpxLog(`${t('slash.acpxExitCode')}: ${d.exitCode ?? 'null'}`, detail.success ? 'info' : 'error');
-        appendAcpxLog(detail.success ? t('slash.acpxProgressDone') : (d.error || t('slash.acpxProgressFailed')), detail.success ? 'done' : 'error');
-      }
-    };
-
-    window.addEventListener('hana-acpx-tool', onAcpxToolEvent);
-    return () => window.removeEventListener('hana-acpx-tool', onAcpxToolEvent);
-  }, [appendAcpxLog, t]);
-
   const diaryFn = useCallback(
     executeDiary(t, showSlashResult, setSlashBusy, () => { editor?.commands.clearContent(); }, setSlashMenuOpen),
     [t, showSlashResult, editor],
   );
-  const acpxFn = useCallback(async () => {
-    await executeAcpxSlashCommand([], t, showSlashResult, setSlashBusy, setInputText, setSlashMenuOpen, undefined, undefined, currentSessionPath || undefined);
-  }, [currentSessionPath, t, showSlashResult]);
   const xingFn = useCallback(async () => {
     editor?.commands.clearContent();
     setSlashMenuOpen(false);
@@ -400,13 +199,8 @@ function InputAreaInner() {
   const skillItems = useSkillSlashItems();
 
   const slashCommands = useMemo(
-<<<<<<< HEAD
-    () => buildSlashCommands(t, acpxFn, diaryFn, xingFn, compactFn),
-    [acpxFn, diaryFn, xingFn, compactFn, t],
-=======
     () => [...buildSlashCommands(t, diaryFn, xingFn, compactFn), ...skillItems],
     [diaryFn, xingFn, compactFn, t, skillItems],
->>>>>>> upstream/main
   );
 
   const filteredCommands = useMemo(() => {
@@ -502,39 +296,8 @@ function InputAreaInner() {
     const { text: rawText, skills } = serializeEditor(editorJson);
     const text = rawText.trim();
 
-<<<<<<< HEAD
-    const acpxArgs = parseAcpxSlashCommand(text);
-    if (acpxArgs !== null) {
-      appendAcpxLog(`${t('slash.acpxProgressQueued')}: ${acpxArgs.join(' ')}`, 'info');
-      const controller = new AbortController();
-      acpxAbortRef.current = controller;
-      setAcpxRunning(true);
-      const result = await executeAcpxSlashCommand(
-        acpxArgs,
-        t,
-        showSlashResult,
-        setSlashBusy,
-        setInputText,
-        setSlashMenuOpen,
-        handleAcpxProgress,
-        controller.signal,
-        currentSessionPath || undefined,
-      );
-      if (result.aborted) {
-        appendAcpxLog(t('slash.acpxStopped'), 'error');
-      }
-      acpxAbortRef.current = null;
-      setAcpxRunning(false);
-      await appendAcpxSummaryToChat(acpxArgs, result.ok, result.error);
-      return;
-    }
-
-    // 斜杠命令拦截
-    if (text.startsWith('/') && slashMenuOpen && filteredCommands.length > 0) {
-=======
     // 斜杠命令拦截（仅当无 skill badge 时）
     if (text.startsWith('/') && skills.length === 0 && slashMenuOpen && filteredCommands.length > 0) {
->>>>>>> upstream/main
       const cmd = filteredCommands[slashSelected] || filteredCommands[0];
       if (cmd) { handleSlashSelect(cmd); return; }
     }
@@ -649,11 +412,7 @@ function InputAreaInner() {
     } finally {
       setSending(false);
     }
-<<<<<<< HEAD
-  }, [inputText, t, showSlashResult, appendAcpxLog, handleAcpxProgress, appendAcpxSummaryToChat, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, setDocContextAttached, slashMenuOpen, filteredCommands, slashSelected]);
-=======
   }, [editor, attachedFiles, docContextAttached, connected, isStreaming, sending, pendingNewSession, currentDoc, clearAttachedFiles, setDocContextAttached, slashMenuOpen, filteredCommands, slashSelected, handleSlashSelect]);
->>>>>>> upstream/main
 
   // ── Steer ──
   const handleSteer = useCallback(async () => {
@@ -724,32 +483,6 @@ function InputAreaInner() {
         <div className={styles['slash-busy-bar']}>
           <span className={styles[slashResult.type === 'success' ? 'slash-result-dot-ok' : 'slash-result-dot-err']} />
           <span>{slashResult.text}</span>
-        </div>
-      )}
-      {acpxLogs.length > 0 && (
-        <div className={styles['acpx-progress-panel']}>
-          <div className={styles['acpx-progress-header']}>
-            <span className={styles['acpx-progress-title']}>{t('slash.acpxPanelTitle')}</span>
-            <div className={styles['acpx-progress-actions']}>
-              {acpxRunning && (
-                <button className={styles['acpx-progress-clear']} onClick={stopAcpxRun}>{t('slash.acpxStop')}</button>
-              )}
-              <button className={styles['acpx-progress-clear']} onClick={toggleAcpxCollapsed}>
-                {acpxCollapsed ? t('slash.acpxExpand') : t('slash.acpxCollapse')}
-              </button>
-              <button className={styles['acpx-progress-clear']} onClick={copyAcpxLogs}>{t('slash.acpxCopy')}</button>
-              <button className={styles['acpx-progress-clear']} onClick={clearAcpxLogs}>{t('slash.acpxClear')}</button>
-            </div>
-          </div>
-          {!acpxCollapsed && (
-            <div className={styles['acpx-progress-body']}>
-              {acpxLogs.map(log => (
-                <div key={log.id} className={`${styles['acpx-progress-line']} ${styles[`acpx-progress-${log.kind}`]}`}>
-                  {log.text}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
       {(attachedFiles.length > 0 || quotedSelection || sessionTodos.length > 0) && (
